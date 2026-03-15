@@ -7,307 +7,406 @@
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
+  @font-face {
+    font-family: 'Terminal';
+    src: local('Courier New'), local('Consolas'), local('monospace');
+  }
+
   body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: 'Courier New', Consolas, monospace;
     background: #0a0a0a;
-    color: #e0e0e0;
+    color: #33ff33;
     height: 100vh;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
+    text-shadow: 0 0 5px rgba(51, 255, 51, 0.5);
   }
 
-  header {
-    background: linear-gradient(135deg, #1a1a1a 0%, #0d1b0d 100%);
-    border-bottom: 2px solid #76b900;
-    padding: 12px 20px;
+  /* CRT scanline overlay */
+  body::after {
+    content: '';
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0, 0, 0, 0.15) 2px,
+      rgba(0, 0, 0, 0.15) 4px
+    );
+    pointer-events: none;
+    z-index: 1000;
+  }
+
+  /* CRT flicker */
+  body::before {
+    content: '';
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(51, 255, 51, 0.03);
+    animation: flicker 0.15s infinite alternate;
+    pointer-events: none;
+    z-index: 999;
+  }
+
+  @keyframes flicker {
+    0% { opacity: 0.97; }
+    100% { opacity: 1; }
+  }
+
+  .header-bar {
+    background: #33ff33;
+    color: #000;
+    padding: 2px 8px;
+    font-size: 13px;
+    font-weight: bold;
     display: flex;
-    align-items: center;
-    gap: 16px;
+    justify-content: space-between;
     flex-shrink: 0;
-  }
-
-  .logo {
-    font-size: 48px;
-    line-height: 1;
-    filter: drop-shadow(0 0 8px rgba(118, 185, 0, 0.5));
-  }
-
-  .header-text h1 {
-    font-size: 22px;
-    color: #76b900;
-    font-weight: 700;
     letter-spacing: 1px;
   }
 
-  .header-text p {
-    font-size: 12px;
-    color: #888;
-    margin-top: 2px;
+  .header-bar .right { font-weight: normal; }
+
+  #main {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
   }
 
-  .powered-by {
-    margin-left: auto;
+  #jensen-panel {
+    width: 320px;
+    flex-shrink: 0;
+    border-right: 1px solid #1a5a1a;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    overflow: hidden;
+    position: relative;
+  }
+
+  #jensen-ascii {
     font-size: 10px;
-    color: #555;
-    text-align: right;
-    line-height: 1.4;
+    line-height: 1.15;
+    white-space: pre;
+    color: #33ff33;
+    text-align: center;
+    margin-top: 8px;
   }
 
-  .powered-by span { color: #76b900; }
+  #jensen-status {
+    margin-top: 12px;
+    font-size: 12px;
+    color: #1aaa1a;
+    text-align: center;
+  }
+
+  #claw-anim {
+    font-size: 11px;
+    line-height: 1.2;
+    white-space: pre;
+    color: #33ff33;
+    text-align: center;
+    margin-top: 8px;
+    min-height: 60px;
+    display: none;
+  }
+
+  #chat-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  #chat-header {
+    padding: 4px 12px;
+    font-size: 12px;
+    color: #1a8a1a;
+    border-bottom: 1px solid #1a5a1a;
+    flex-shrink: 0;
+  }
 
   #chat {
     flex: 1;
     overflow-y: auto;
-    padding: 20px;
+    padding: 8px 12px;
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 8px;
   }
+
+  #chat::-webkit-scrollbar { width: 8px; }
+  #chat::-webkit-scrollbar-track { background: #0a0a0a; }
+  #chat::-webkit-scrollbar-thumb { background: #1a5a1a; }
 
   .msg {
-    display: flex;
-    gap: 12px;
-    max-width: 85%;
-    animation: fadeIn 0.3s ease;
-  }
-
-  @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(8px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-
-  .msg.assistant { align-self: flex-start; }
-  .msg.user { align-self: flex-end; flex-direction: row-reverse; }
-
-  .avatar {
-    width: 44px;
-    height: 44px;
-    border-radius: 50%;
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 24px;
-  }
-
-  .msg.assistant .avatar {
-    background: linear-gradient(135deg, #1a2a0a, #2a3a1a);
-    border: 2px solid #76b900;
-    box-shadow: 0 0 12px rgba(118, 185, 0, 0.3);
-  }
-
-  .msg.user .avatar {
-    background: #1a1a2a;
-    border: 2px solid #4a4aff;
-  }
-
-  .bubble {
-    padding: 12px 16px;
-    border-radius: 16px;
+    animation: typeIn 0.1s ease;
+    font-size: 13px;
     line-height: 1.5;
-    font-size: 14px;
+  }
+
+  @keyframes typeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  .msg .prefix {
+    font-weight: bold;
+  }
+
+  .msg.user .prefix { color: #33aaff; }
+  .msg.assistant .prefix { color: #33ff33; }
+
+  .msg .text {
     white-space: pre-wrap;
     word-break: break-word;
   }
 
-  .msg.assistant .bubble {
-    background: #1a1a1a;
-    border: 1px solid #333;
-    border-bottom-left-radius: 4px;
+  .msg.system {
+    color: #1a6a1a;
+    font-style: italic;
   }
 
-  .msg.user .bubble {
-    background: #1a1a3a;
-    border: 1px solid #3a3a6a;
-    border-bottom-right-radius: 4px;
+  .cursor-blink {
+    animation: blink 1s step-end infinite;
   }
 
-  .typing-indicator {
-    display: flex;
-    gap: 4px;
-    padding: 4px 0;
-  }
-
-  .typing-indicator span {
-    width: 8px;
-    height: 8px;
-    background: #76b900;
-    border-radius: 50%;
-    animation: bounce 1.4s infinite;
-  }
-
-  .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
-  .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
-
-  @keyframes bounce {
-    0%, 60%, 100% { transform: translateY(0); }
-    30% { transform: translateY(-8px); }
+  @keyframes blink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0; }
   }
 
   #input-area {
-    padding: 16px 20px;
-    background: #111;
-    border-top: 1px solid #333;
+    padding: 4px 12px 8px;
+    border-top: 1px solid #1a5a1a;
     display: flex;
-    gap: 12px;
+    gap: 0;
     flex-shrink: 0;
+    align-items: center;
+  }
+
+  #input-prompt {
+    color: #33ff33;
+    font-size: 13px;
+    font-family: inherit;
+    white-space: pre;
   }
 
   #input {
     flex: 1;
-    background: #1a1a1a;
-    border: 1px solid #333;
-    border-radius: 24px;
-    padding: 12px 20px;
-    color: #e0e0e0;
-    font-size: 14px;
-    outline: none;
-    transition: border-color 0.2s;
-  }
-
-  #input:focus { border-color: #76b900; }
-
-  #input::placeholder { color: #555; }
-
-  #send {
-    background: #76b900;
-    color: #000;
+    background: transparent;
     border: none;
-    border-radius: 24px;
-    padding: 12px 24px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s;
-    white-space: nowrap;
+    color: #33ff33;
+    font-size: 13px;
+    font-family: 'Courier New', Consolas, monospace;
+    outline: none;
+    caret-color: #33ff33;
+    text-shadow: 0 0 5px rgba(51, 255, 51, 0.5);
   }
 
-  #send:hover { background: #8ad100; transform: scale(1.02); }
-  #send:active { transform: scale(0.98); }
-  #send:disabled { background: #333; color: #666; cursor: not-allowed; transform: none; }
+  #input::placeholder { color: #1a5a1a; }
 
-  .welcome {
-    text-align: center;
-    padding: 40px 20px;
-    color: #555;
+  .footer-bar {
+    background: #33ff33;
+    color: #000;
+    padding: 2px 8px;
+    font-size: 11px;
+    display: flex;
+    justify-content: space-between;
+    flex-shrink: 0;
   }
 
-  .welcome .jensen-art {
-    font-size: 80px;
-    margin-bottom: 16px;
-    filter: drop-shadow(0 0 20px rgba(118, 185, 0, 0.4));
+  /* Matrix rain background on jensen panel */
+  .matrix-col {
+    position: absolute;
+    top: 0;
+    font-size: 12px;
+    line-height: 1;
+    color: rgba(51, 255, 51, 0.08);
+    writing-mode: vertical-lr;
+    animation: rain linear infinite;
+    pointer-events: none;
   }
 
-  .welcome h2 {
-    color: #76b900;
-    font-size: 20px;
-    margin-bottom: 8px;
-  }
-
-  .welcome p { font-size: 13px; line-height: 1.6; }
-
-  .claw-click {
-    display: inline-block;
-    animation: clack 0.6s ease infinite;
-  }
-
-  @keyframes clack {
-    0%, 100% { transform: rotate(0deg); }
-    25% { transform: rotate(-8deg); }
-    75% { transform: rotate(8deg); }
+  @keyframes rain {
+    0% { transform: translateY(-100%); }
+    100% { transform: translateY(100vh); }
   }
 </style>
 </head>
 <body>
 
-<header>
-  <div class="logo"><span class="claw-click">🦀</span></div>
-  <div class="header-text">
-    <h1>JENSENCLAW</h1>
-    <p>RoboJensen v0.1 &mdash; Now with 100% more claws</p>
-  </div>
-  <div class="powered-by">
-    Powered by <span>NemoClaw</span><br>
-    Nemotron 3 Super 120B<br>
-    Running on <span>NVIDIA</span> inference
-  </div>
-</header>
+<div class="header-bar">
+  <span>JENSENCLAW v0.1 // NEMOCLAW TERMINAL</span>
+  <span class="right">NEMOTRON-3-SUPER-120B | NVIDIA INFERENCE</span>
+</div>
 
-<div id="chat">
-  <div class="welcome">
-    <div class="jensen-art">🦞🧥</div>
-    <h2>Welcome to JensenClaw</h2>
-    <p>
-      You're talking to <strong>RoboJensen</strong> &mdash; an AI Jensen Huang with giant robot crab claws.<br>
-      He's running on Nemotron 3 Super 120B via NemoClaw + OpenShell.<br>
-      He's wearing a leather jacket. The claws poke through the sleeves.<br><br>
-      <em>Say hello. He'll click his claws at you.</em>
-    </p>
+<div id="main">
+  <div id="jensen-panel">
+    <pre id="jensen-ascii">
+        ___________
+       /           \
+      /  .---. .---.  \
+     |  ( o )   ( o )  |
+     |      / _ \      |
+      \    | (_) |    /
+       \   '.___.`   /
+        \  _______  /
+    __.--'|       |'--.__
+   /  __  | NVIDIA|  __  \
+  | /  \ |_______|/  \ |
+  ||\__/  ___   ___  \__/||
+  ||     |   | |   |     ||
+  ||     |___| |___|     ||
+   \    _____________    /
+    \  |  _________  |  /
+     \_| |         | |_/
+       | | LEATHER | |
+       | | JACKET  | |
+       | |_________| |
+       |_____________|
+          ||     ||
+         _||_   _||_
+        |claw| |claw|
+        '----' '----'</pre>
+    <div id="jensen-status">[ ONLINE ] Awaiting input...</div>
+    <pre id="claw-anim"></pre>
+  </div>
+
+  <div id="chat-panel">
+    <div id="chat-header">--- ROBOJENSEN CHAT LOG ---</div>
+    <div id="chat">
+      <div class="msg system">System initialized. RoboJensen online.</div>
+      <div class="msg system">Type a message to speak with RoboJensen.</div>
+      <div class="msg system">He has claws. He is enthusiastic. He cannot be stopped.</div>
+    </div>
+    <div id="input-area">
+      <span id="input-prompt">you&gt; </span>
+      <input type="text" id="input" placeholder="talk to robojensen..." autocomplete="off" autofocus>
+    </div>
   </div>
 </div>
 
-<div id="input-area">
-  <input type="text" id="input" placeholder="Talk to RoboJensen..." autocomplete="off" autofocus>
-  <button id="send">Send 🦀</button>
+<div class="footer-bar">
+  <span>CTRL-C EXIT | RUNNING ON OPENSHELL + NEMOCLAW</span>
+  <span id="clock"></span>
 </div>
 
 <script>
 const chat = document.getElementById('chat');
 const input = document.getElementById('input');
-const sendBtn = document.getElementById('send');
+const jensenStatus = document.getElementById('jensen-status');
+const clawAnim = document.getElementById('claw-anim');
+const clock = document.getElementById('clock');
 
 let messages = [];
 let streaming = false;
 
-function addMessage(role, content) {
-  // Remove welcome screen on first message
-  const welcome = chat.querySelector('.welcome');
-  if (welcome) welcome.remove();
+// Clock
+setInterval(() => {
+  const d = new Date();
+  clock.textContent = d.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+}, 1000);
 
+// Matrix rain on jensen panel
+const panel = document.getElementById('jensen-panel');
+const chars = 'NVIDIA GPU CUDA TENSOR CORE NEMOTRON CLAW'.split('');
+for (let i = 0; i < 8; i++) {
+  const col = document.createElement('div');
+  col.className = 'matrix-col';
+  col.style.left = (i * 40 + 10) + 'px';
+  col.style.animationDuration = (8 + Math.random() * 12) + 's';
+  col.style.animationDelay = (-Math.random() * 10) + 's';
+  let text = '';
+  for (let j = 0; j < 50; j++) {
+    text += chars[Math.floor(Math.random() * chars.length)] + '\n';
+  }
+  col.textContent = text;
+  panel.appendChild(col);
+}
+
+// Claw scratch chin animation frames
+const clawFrames = [
+  [
+    "        ,---.",
+    "       /  *  \\",
+    "      | \\___/ |",
+    "       \\_____/",
+    "          |     ",
+    "    /\\_/\\_|     ",
+    "   ( claw )     ",
+    "    \\_____/     ",
+  ],
+  [
+    "        ,---.",
+    "       /  *  \\",
+    "  __  | \\___/ |",
+    "  \\ \\  \\_____/",
+    "   \\ \\    |    ",
+    "    \\_\\---|    ",
+    "   ( claw )    ",
+    "    \\_____/    ",
+  ],
+  [
+    "        ,---.",
+    "   __  /  *  \\",
+    "   \\ \\| \\___/ |",
+    "    \\_|\\_____/",
+    "      |   |    ",
+    "      '---|    ",
+    "   ( claw )    ",
+    "    \\_____/    ",
+  ],
+  [
+    "    ___,---.",
+    "   /  /  *  \\",
+    "  (  | \\___/ |",
+    "   \\_|\\_____/",
+    "     \\   |    ",
+    "      ---|    ",
+    "   ( claw )   ",
+    "    \\_____/   ",
+  ],
+];
+
+function showClawScratch() {
+  clawAnim.style.display = 'block';
+  let frame = 0;
+  const interval = setInterval(() => {
+    clawAnim.textContent = clawFrames[frame % clawFrames.length].join('\n');
+    frame++;
+    if (frame >= clawFrames.length * 3) {
+      clearInterval(interval);
+      clawAnim.style.display = 'none';
+    }
+  }, 200);
+}
+
+function addMsg(role, text) {
   const div = document.createElement('div');
   div.className = `msg ${role}`;
 
-  const avatar = document.createElement('div');
-  avatar.className = 'avatar';
-  avatar.textContent = role === 'assistant' ? '🦀' : '👤';
+  if (role === 'system') {
+    div.textContent = text;
+  } else {
+    const prefix = document.createElement('span');
+    prefix.className = 'prefix';
+    prefix.textContent = role === 'user' ? 'you> ' : 'robojensen> ';
 
-  const bubble = document.createElement('div');
-  bubble.className = 'bubble';
-  bubble.textContent = content;
+    const content = document.createElement('span');
+    content.className = 'text';
+    content.textContent = text;
 
-  div.appendChild(avatar);
-  div.appendChild(bubble);
+    div.appendChild(prefix);
+    div.appendChild(content);
+  }
+
   chat.appendChild(div);
   chat.scrollTop = chat.scrollHeight;
-
-  return bubble;
-}
-
-function addTypingIndicator() {
-  const welcome = chat.querySelector('.welcome');
-  if (welcome) welcome.remove();
-
-  const div = document.createElement('div');
-  div.className = 'msg assistant';
-  div.id = 'typing';
-
-  const avatar = document.createElement('div');
-  avatar.className = 'avatar';
-  avatar.textContent = '🦀';
-
-  const bubble = document.createElement('div');
-  bubble.className = 'bubble';
-  bubble.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
-
-  div.appendChild(avatar);
-  div.appendChild(bubble);
-  chat.appendChild(div);
-  chat.scrollTop = chat.scrollHeight;
-}
-
-function removeTypingIndicator() {
-  const el = document.getElementById('typing');
-  if (el) el.remove();
+  return div;
 }
 
 async function sendMessage() {
@@ -316,11 +415,11 @@ async function sendMessage() {
 
   input.value = '';
   messages.push({ role: 'user', content: text });
-  addMessage('user', text);
+  addMsg('user', text);
 
   streaming = true;
-  sendBtn.disabled = true;
-  addTypingIndicator();
+  jensenStatus.textContent = '[ THINKING ] *scratches chin with claw*';
+  showClawScratch();
 
   try {
     const res = await fetch('/api/chat', {
@@ -329,15 +428,17 @@ async function sendMessage() {
       body: JSON.stringify({ messages }),
     });
 
-    removeTypingIndicator();
-
     if (!res.ok) {
       const err = await res.json();
-      addMessage('assistant', `*clicks claws nervously* Error: ${err.error || res.statusText}`);
+      jensenStatus.textContent = '[ ERROR ] Connection failed';
+      addMsg('system', `ERROR: ${err.error || res.statusText}`);
       return;
     }
 
-    const bubble = addMessage('assistant', '');
+    jensenStatus.textContent = '[ SPEAKING ] Streaming response...';
+
+    const msgDiv = addMsg('assistant', '');
+    const textSpan = msgDiv.querySelector('.text');
     let fullText = '';
 
     const reader = res.body.getReader();
@@ -360,11 +461,10 @@ async function sendMessage() {
         try {
           const parsed = JSON.parse(data);
           const delta = parsed.choices?.[0]?.delta;
-          // Handle both content and reasoning_content
-          const text = delta?.content || delta?.reasoning_content || '';
-          if (text) {
-            fullText += text;
-            bubble.textContent = fullText;
+          const chunk = delta?.content || delta?.reasoning_content || '';
+          if (chunk) {
+            fullText += chunk;
+            textSpan.textContent = fullText;
             chat.scrollTop = chat.scrollHeight;
           }
         } catch {}
@@ -373,16 +473,15 @@ async function sendMessage() {
 
     messages.push({ role: 'assistant', content: fullText });
   } catch (err) {
-    removeTypingIndicator();
-    addMessage('assistant', `*claws droop* Connection error: ${err.message}`);
+    addMsg('system', `CONNECTION ERROR: ${err.message}`);
+    jensenStatus.textContent = '[ ERROR ] *claws droop*';
   } finally {
     streaming = false;
-    sendBtn.disabled = false;
+    jensenStatus.textContent = '[ ONLINE ] Awaiting input...';
     input.focus();
   }
 }
 
-sendBtn.addEventListener('click', sendMessage);
 input.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
