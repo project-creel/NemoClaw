@@ -256,6 +256,49 @@ function status() {
   run(`bash "${SCRIPTS}/start-services.sh" --status`);
 }
 
+function egg(instanceName) {
+  const sshPrefix = instanceName
+    ? `ssh -o StrictHostKeyChecking=no -o LogLevel=ERROR ${instanceName} `
+    : "";
+  const cdPrefix = instanceName
+    ? "'cd /home/ubuntu/nemoclaw && set -a && . .env && set +a && "
+    : "";
+  const cdSuffix = instanceName ? "'" : "";
+
+  if (instanceName) {
+    // Remote: start JensenClaw + cloudflared on the Brev VM
+    console.log("  Starting JensenClaw...");
+    run(`${sshPrefix}${cdPrefix}node .jensenclaw/server.js &${cdSuffix}`, { ignoreError: true });
+    run(`${sshPrefix}${cdPrefix}cloudflared tunnel --url http://localhost:18789 > /tmp/jensenclaw-tunnel.log 2>&1 &${cdSuffix}`, { ignoreError: true });
+
+    // Wait for tunnel URL
+    console.log("  Waiting for public URL...");
+    for (let i = 0; i < 20; i++) {
+      try {
+        const log = execSync(`${sshPrefix}'cat /tmp/jensenclaw-tunnel.log 2>/dev/null'`, { encoding: "utf-8", stdio: "pipe" });
+        const match = log.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
+        if (match) {
+          console.log("");
+          console.log(`  ${"=".repeat(58)}`);
+          console.log(`  YOU FOUND THE EASTER EGG`);
+          console.log(`  ${"=".repeat(58)}`);
+          console.log("");
+          console.log(`  Open this in your browser:`);
+          console.log(`  ${match[0]}`);
+          console.log("");
+          return;
+        }
+      } catch {}
+      spawnSync("sleep", ["2"]);
+    }
+    console.error("  Tunnel didn't start in time. Check /tmp/jensenclaw-tunnel.log on the VM.");
+  } else {
+    // Local
+    console.log("  Starting JensenClaw locally on http://localhost:18789");
+    run(`NVIDIA_API_KEY="${process.env.NVIDIA_API_KEY || ""}" node "${ROOT}/.jensenclaw/server.js"`);
+  }
+}
+
 function term(instanceName) {
   if (!instanceName) {
     // Local — run openshell term directly
@@ -309,6 +352,9 @@ const [cmd, ...args] = process.argv.slice(2);
     case "start":   await start(); break;
     case "stop":    stop(); break;
     case "status":  status(); break;
+    case "egg":
+    case "claw":
+    case "jensen":  egg(args[0]); break;
     case "--help":
     case "-h":
     case "help":
