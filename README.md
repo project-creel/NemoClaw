@@ -128,6 +128,22 @@ Use the OpenClaw CLI to send a single message and print the response:
 sandbox@my-assistant:~$ openclaw agent --agent main --local -m "hello" --session-id test
 ```
 
+### Uninstall
+
+To remove NemoClaw and all resources created during setup, run the uninstall script from the repo root:
+
+```console
+$ ./uninstall.sh
+```
+
+The script removes sandboxes, the NemoClaw gateway and providers, related Docker images and containers, local state directories, and the global `nemoclaw` npm package. It does not remove shared system tooling such as Docker, Node.js, npm, or Ollama.
+
+| Flag               | Effect                                              |
+|--------------------|-----------------------------------------------------|
+| `--yes`            | Skip the confirmation prompt.                       |
+| `--keep-openshell` | Leave the `openshell` binary installed.              |
+| `--delete-models`  | Also remove NemoClaw-pulled Ollama models.           |
+
 <!-- end-quickstart-guide -->
 
 ---
