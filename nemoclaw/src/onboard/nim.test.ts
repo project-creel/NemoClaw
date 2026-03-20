@@ -155,7 +155,35 @@ describe("nim helpers", () => {
 
     expect(commands).toEqual([
       "docker rm -f nemoclaw-nim-openclaw 2>/dev/null",
-      "docker run -d --gpus all -p 8000:8000 --name nemoclaw-nim-openclaw --shm-size 16g -e NGC_API_KEY='ngc-secret' -e NVIDIA_API_KEY='nvapi-secret' nvcr.io/nim/nvidia/nemotron-3-nano-30b-a3b:latest",
+      "docker run -d --gpus all -p 8000:8000 --name nemoclaw-nim-openclaw --shm-size 16g -e NVIDIA_API_KEY='nvapi-secret' -e NGC_API_KEY='ngc-secret' nvcr.io/nim/nvidia/nemotron-3-nano-30b-a3b:latest",
+    ]);
+  });
+
+  it("mirrors NVIDIA_API_KEY into NGC_API_KEY when only NVIDIA_API_KEY is set", () => {
+    const originalNgcApiKey = process.env.NGC_API_KEY;
+    const originalNvidiaApiKey = process.env.NVIDIA_API_KEY;
+    delete process.env.NGC_API_KEY;
+    process.env.NVIDIA_API_KEY = "nvapi-secret";
+
+    const commands: string[] = [];
+    const runtime = runtimeWithResponses({}, commands);
+    runtime.exec = (command: string) => {
+      commands.push(command);
+      return "";
+    };
+
+    try {
+      startNimContainer("openclaw", "nvidia/nemotron-3-nano-30b-a3b", runtime);
+    } finally {
+      if (originalNgcApiKey === undefined) delete process.env.NGC_API_KEY;
+      else process.env.NGC_API_KEY = originalNgcApiKey;
+      if (originalNvidiaApiKey === undefined) delete process.env.NVIDIA_API_KEY;
+      else process.env.NVIDIA_API_KEY = originalNvidiaApiKey;
+    }
+
+    expect(commands).toEqual([
+      "docker rm -f nemoclaw-nim-openclaw 2>/dev/null",
+      "docker run -d --gpus all -p 8000:8000 --name nemoclaw-nim-openclaw --shm-size 16g -e NVIDIA_API_KEY='nvapi-secret' -e NGC_API_KEY='nvapi-secret' nvcr.io/nim/nvidia/nemotron-3-nano-30b-a3b:latest",
     ]);
   });
 

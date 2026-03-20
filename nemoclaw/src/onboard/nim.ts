@@ -70,11 +70,12 @@ function getContainerCredentialArgs(): string[] {
   const credentials: string[] = [];
   const ngcApiKey = process.env.NGC_API_KEY?.trim();
   const nvidiaApiKey = process.env.NVIDIA_API_KEY?.trim();
-  if (ngcApiKey) {
-    credentials.push(`-e NGC_API_KEY=${shellQuote(ngcApiKey)}`);
-  }
   if (nvidiaApiKey) {
     credentials.push(`-e NVIDIA_API_KEY=${shellQuote(nvidiaApiKey)}`);
+  }
+  const effectiveNgcApiKey = ngcApiKey || nvidiaApiKey;
+  if (effectiveNgcApiKey) {
+    credentials.push(`-e NGC_API_KEY=${shellQuote(effectiveNgcApiKey)}`);
   }
   return credentials;
 }
