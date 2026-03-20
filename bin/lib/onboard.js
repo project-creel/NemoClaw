@@ -618,14 +618,15 @@ async function setupNim(sandboxName, gpu) {
     }
 
     if (selected.key === "nim") {
-      const models = nim.getCompatibleModels(gpu, gpu.freeDiskGB ?? null);
+      const assessments = nim.assessNimModels(gpu, gpu.freeDiskGB ?? null);
+      const models = assessments.filter((assessment) => assessment.status !== "unsupported");
       if (models.length === 0) {
         console.log("  No bundled NIM models match the detected GPU/disk profile. Falling back to cloud API.");
       } else {
         let sel;
         if (isNonInteractive()) {
           if (requestedModel) {
-            sel = models.find((m) => m.name === requestedModel);
+            sel = models.find((assessment) => assessment.model.name === requestedModel);
             if (!sel) {
               console.error(`  Unsupported NEMOCLAW_MODEL for NIM: ${requestedModel}`);
               process.exit(1);
@@ -633,21 +634,31 @@ async function setupNim(sandboxName, gpu) {
           } else {
             sel = models[0];
           }
-          console.log(`  [non-interactive] NIM model: ${sel.name}`);
+          console.log(`  [non-interactive] NIM model: ${sel.model.name}`);
         } else {
           console.log("");
           console.log("  Recommended NIM models for this machine:");
-          models.forEach((m, i) => {
-            const tags = (m.recommendedFor || []).join(", ");
-            console.log(`    ${i + 1}) ${m.name}${tags ? ` [${tags}]` : ""}`);
+          models.forEach((assessment, i) => {
+            const tags = (assessment.model.recommendedFor || []).join(", ");
+            console.log(
+              `    ${i + 1}) ${assessment.model.name} [${assessment.status}]${tags ? ` [${tags}]` : ""} - ${assessment.reason}`
+            );
           });
+          const hidden = assessments.filter((assessment) => assessment.status === "unsupported").slice(0, 5);
+          if (hidden.length > 0) {
+            console.log("");
+            console.log("  Not offered:");
+            hidden.forEach((assessment) => {
+              console.log(`    - ${assessment.model.name}: ${assessment.reason}`);
+            });
+          }
           console.log("");
 
           const modelChoice = await prompt(`  Choose model [1]: `);
           const midx = parseInt(modelChoice || "1", 10) - 1;
           sel = models[midx] || models[0];
         }
-        model = sel.name;
+        model = sel.model.name;
 
         console.log(`  Pulling NIM image for ${model}...`);
         const resolvedImage = nim.pullNimImage(model);
@@ -661,7 +672,7 @@ async function setupNim(sandboxName, gpu) {
           model = null;
           nimContainer = null;
         } else {
-          model = nim.getServedModelForModel(model);
+          model = nim.resolveRunningNimModel(model);
           provider = "nim-local";
         }
       }

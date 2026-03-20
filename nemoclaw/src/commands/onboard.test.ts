@@ -61,6 +61,30 @@ vi.mock("../onboard/nim.js", () => ({
       minGpuMemoryMB: 40960,
     },
   ]),
+  assessNimModels: vi.fn(() => [
+    {
+      model: {
+        name: "nvidia/nemotron-3-nano-30b-a3b",
+        image: "nvcr.io/nim/nvidia/nemotron-3-nano:latest",
+        minGpuMemoryMB: 32768,
+        recommendedFor: ["general", "chat", "tool-use"],
+      },
+      status: "recommended",
+      score: 100,
+      reason: "Recommended for this machine via 1x l40s FP8, 32 GB disk.",
+    },
+    {
+      model: {
+        name: "nvidia/nemotron-3-super-120b-a12b",
+        image: "nvcr.io/nim/nvidia/nemotron-3-super-120b-a12b:latest",
+        minGpuMemoryMB: 184320,
+        recommendedFor: ["general", "tool-use", "quality"],
+      },
+      status: "unsupported",
+      score: Number.NEGATIVE_INFINITY,
+      reason: "Needs 2 GPUs.",
+    },
+  ]),
   getCompatibleModels: vi.fn(() => [
     {
       name: "nvidia/nemotron-3-nano-30b-a3b",
@@ -76,6 +100,9 @@ vi.mock("../onboard/nim.js", () => ({
     },
   ]),
   getServedModelForModel: vi.fn((model: string) =>
+    model === "nvidia/nemotron-3-nano-30b-a3b" ? "nvidia/nemotron-3-nano" : model,
+  ),
+  resolveRunningNimModel: vi.fn((_: unknown, model: string) =>
     model === "nvidia/nemotron-3-nano-30b-a3b" ? "nvidia/nemotron-3-nano" : model,
   ),
   pullNimImage: vi.fn(() => "nvcr.io/nim/nvidia/nemotron-3-nano:latest"),

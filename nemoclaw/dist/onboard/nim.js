@@ -13,15 +13,18 @@ exports.getImageForModel = getImageForModel;
 exports.detectGpu = detectGpu;
 exports.pullNimImage = pullNimImage;
 exports.detectDiskSpaceGB = detectDiskSpaceGB;
+exports.assessNimModels = assessNimModels;
 exports.getCompatibleModels = getCompatibleModels;
+exports.getRecommendedModels = getRecommendedModels;
+exports.resolveRunningNimModel = resolveRunningNimModel;
 exports.startNimContainer = startNimContainer;
 exports.waitForNimHealth = waitForNimHealth;
 const node_child_process_1 = require("node:child_process");
 const nim_images_json_1 = __importDefault(require("../../../bin/lib/nim-images.json"));
-const MODEL_PULL_ALIASES = {
+const MODEL_PULL_FALLBACKS = {
     "nvidia/nemotron-3-nano-30b-a3b": ["nvcr.io/nim/nvidia/nemotron-3-nano-30b-a3b:latest"],
 };
-const MODEL_API_ALIASES = {
+const MODEL_SERVED_ID_ALIASES = {
     "nvidia/nemotron-3-nano-30b-a3b": "nvidia/nemotron-3-nano",
     "z-ai/glm5": "zai-org/GLM-5",
 };
@@ -88,10 +91,10 @@ function getPullCandidatesForModel(modelName) {
     if (!primary) {
         return [];
     }
-    return [primary, ...(MODEL_PULL_ALIASES[modelName] ?? [])];
+    return [primary, ...(MODEL_PULL_FALLBACKS[modelName] ?? [])];
 }
 function getServedModelForModel(modelName) {
-    return MODEL_API_ALIASES[modelName] ?? modelName;
+    return MODEL_SERVED_ID_ALIASES[modelName] ?? modelName;
 }
 function getContainerCredentialArgs() {
     const credentials = [];
@@ -243,22 +246,228 @@ function profileMatches(profile, gpu, freeDiskGB) {
     }
     return true;
 }
-function getCompatibleModels(gpu, freeDiskGB = gpu.freeDiskGB ?? null) {
-    return listModels()
-        .filter((model) => {
-        if ((model.profiles?.length ?? 0) > 0) {
-            return model.profiles?.some((profile) => profileMatches(profile, gpu, freeDiskGB));
+function describeGpuFamilies(profile) {
+    const families = profile.gpuFamilies ?? [];
+    if (families.length === 0) {
+        return "supported GPU";
+    }
+    if (families.length <= 3) {
+        return families.join("/");
+    }
+    return `${families.slice(0, 3).join("/")}+`;
+}
+function describeProfile(profile) {
+    const count = profile.minGpuCount ?? 1;
+    const family = describeGpuFamilies(profile);
+    const precision = profile.precision ? ` ${profile.precision.toUpperCase()}` : "";
+    const disk = profile.minDiskSpaceGB ? `, ${String(profile.minDiskSpaceGB)} GB disk` : "";
+    return `${String(count)}x ${family}${precision}${disk}`;
+}
+function evaluateProfile(profile, gpu, freeDiskGB) {
+    const unmetRequirements = [];
+    let gap = 0;
+    if ((profile.gpuFamilies?.length ?? 0) > 0) {
+        const families = gpu.families ?? [];
+        if (!families.some((family) => profile.gpuFamilies?.includes(family))) {
+            unmetRequirements.push(`GPU family (${describeGpuFamilies(profile)})`);
+            gap += 1000;
         }
-        return model.minGpuMemoryMB <= gpu.totalMemoryMB;
-    })
-        .sort((left, right) => {
-        const leftRank = left.recommendedRank ?? Number.MAX_SAFE_INTEGER;
-        const rightRank = right.recommendedRank ?? Number.MAX_SAFE_INTEGER;
+    }
+    const minGpuCount = profile.minGpuCount ?? 1;
+    if (minGpuCount > gpu.count) {
+        unmetRequirements.push(`${String(minGpuCount)} GPU${minGpuCount === 1 ? "" : "s"}`);
+        gap += (minGpuCount - gpu.count) * 100;
+    }
+    const minPerGpuMemoryMB = profile.minPerGpuMemoryMB ?? 0;
+    if (minPerGpuMemoryMB > gpu.perGpuMB) {
+        const requiredGB = Math.ceil(minPerGpuMemoryMB / 1024);
+        unmetRequirements.push(`${String(requiredGB)} GB per GPU`);
+        gap += Math.ceil((minPerGpuMemoryMB - gpu.perGpuMB) / 1024);
+    }
+    if (freeDiskGB !== null && (profile.minDiskSpaceGB ?? 0) > freeDiskGB) {
+        unmetRequirements.push(`${String(profile.minDiskSpaceGB)} GB free disk`);
+        gap += (profile.minDiskSpaceGB ?? 0) - freeDiskGB;
+    }
+    return {
+        matches: unmetRequirements.length === 0,
+        unmetRequirements,
+        gap,
+    };
+}
+function scoreMatchedProfile(model, profile, gpu, freeDiskGB) {
+    let score = 200;
+    score -= (model.recommendedRank ?? 50) * 10;
+    const tags = new Set(model.recommendedFor ?? []);
+    if (tags.has("general"))
+        score += 20;
+    if (tags.has("tool-use"))
+        score += 18;
+    if (tags.has("coding"))
+        score += 16;
+    if (tags.has("reasoning"))
+        score += 12;
+    if (tags.has("chat"))
+        score += 8;
+    if (tags.has("multimodal"))
+        score -= 10;
+    if (tags.has("quality"))
+        score += 4;
+    const minGpuCount = profile.minGpuCount ?? 1;
+    if (gpu.count === 1 && minGpuCount === 1) {
+        score += 20;
+    }
+    else if (minGpuCount === gpu.count) {
+        score += 10;
+    }
+    else {
+        score -= (minGpuCount - 1) * 4;
+    }
+    const requiredPerGpuMB = profile.minPerGpuMemoryMB ?? model.minGpuMemoryMB;
+    const memoryHeadroomMB = gpu.perGpuMB - requiredPerGpuMB;
+    if (memoryHeadroomMB > 0) {
+        score += Math.min(12, Math.floor(memoryHeadroomMB / 8192));
+    }
+    const requiredDiskGB = profile.minDiskSpaceGB ?? 0;
+    if (requiredDiskGB > 0) {
+        score -= Math.floor(requiredDiskGB / 40);
+    }
+    if (freeDiskGB !== null && requiredDiskGB > 0) {
+        score += Math.max(0, Math.min(8, Math.floor((freeDiskGB - requiredDiskGB) / 50)));
+    }
+    if ((profile.gpuFamilies ?? []).includes(gpu.family ?? "")) {
+        score += 6;
+    }
+    if (profile.precision && ["fp8", "mxfp4", "nvfp4", "int4"].includes(profile.precision)) {
+        score += 4;
+    }
+    if (profile.diskSource === "estimate") {
+        score -= 3;
+    }
+    return score;
+}
+function assessNimModels(gpu, freeDiskGB = gpu.freeDiskGB ?? null) {
+    const compatible = [];
+    const incompatible = [];
+    for (const model of listModels()) {
+        const profiles = model.profiles ?? [];
+        if (profiles.length === 0) {
+            const supported = model.minGpuMemoryMB <= gpu.totalMemoryMB;
+            if (supported) {
+                compatible.push({
+                    model,
+                    status: "supported",
+                    score: 100 - (model.recommendedRank ?? 50),
+                    reason: `Fits detected hardware (${String(Math.floor(gpu.totalMemoryMB / 1024))} GB total GPU memory).`,
+                });
+            }
+            else {
+                incompatible.push({
+                    model,
+                    status: "unsupported",
+                    score: Number.NEGATIVE_INFINITY,
+                    reason: `Needs at least ${String(Math.ceil(model.minGpuMemoryMB / 1024))} GB total GPU memory.`,
+                    unmetRequirements: [`${String(Math.ceil(model.minGpuMemoryMB / 1024))} GB total GPU memory`],
+                });
+            }
+            continue;
+        }
+        const evaluations = profiles.map((profile) => ({
+            profile,
+            ...evaluateProfile(profile, gpu, freeDiskGB),
+        }));
+        const matches = evaluations.filter((evaluation) => evaluation.matches);
+        if (matches.length > 0) {
+            const bestMatch = matches
+                .map((evaluation) => ({
+                profile: evaluation.profile,
+                score: scoreMatchedProfile(model, evaluation.profile, gpu, freeDiskGB),
+            }))
+                .sort((left, right) => right.score - left.score)[0];
+            compatible.push({
+                model,
+                status: "supported",
+                score: bestMatch.score,
+                matchedProfile: bestMatch.profile,
+                reason: `Fits this machine via ${describeProfile(bestMatch.profile)}.`,
+            });
+            continue;
+        }
+        const closest = evaluations.sort((left, right) => left.gap - right.gap)[0];
+        incompatible.push({
+            model,
+            status: "unsupported",
+            score: Number.NEGATIVE_INFINITY,
+            matchedProfile: closest?.profile,
+            unmetRequirements: closest?.unmetRequirements ?? [],
+            reason: closest && closest.unmetRequirements.length > 0
+                ? `Needs ${closest.unmetRequirements.join(", ")}.`
+                : "Does not match the detected GPU profile.",
+        });
+    }
+    compatible.sort((left, right) => {
+        if (left.score !== right.score) {
+            return right.score - left.score;
+        }
+        const leftRank = left.model.recommendedRank ?? Number.MAX_SAFE_INTEGER;
+        const rightRank = right.model.recommendedRank ?? Number.MAX_SAFE_INTEGER;
         if (leftRank !== rightRank) {
             return leftRank - rightRank;
         }
-        return left.minGpuMemoryMB - right.minGpuMemoryMB;
+        return left.model.minGpuMemoryMB - right.model.minGpuMemoryMB;
     });
+    const recommendedLimit = compatible.length <= 3 ? compatible.length : Math.min(4, compatible.length);
+    const topScore = compatible[0]?.score ?? Number.NEGATIVE_INFINITY;
+    for (const [index, assessment] of compatible.entries()) {
+        if (index < recommendedLimit && assessment.score >= topScore - 18) {
+            assessment.status = "recommended";
+            assessment.reason = `Recommended for this machine via ${describeProfile(assessment.matchedProfile ?? {})}.`;
+        }
+    }
+    incompatible.sort((left, right) => {
+        const leftUnmet = left.unmetRequirements?.length ?? 99;
+        const rightUnmet = right.unmetRequirements?.length ?? 99;
+        if (leftUnmet !== rightUnmet) {
+            return leftUnmet - rightUnmet;
+        }
+        const leftRank = left.model.recommendedRank ?? Number.MAX_SAFE_INTEGER;
+        const rightRank = right.model.recommendedRank ?? Number.MAX_SAFE_INTEGER;
+        return leftRank - rightRank;
+    });
+    return [...compatible, ...incompatible];
+}
+function getCompatibleModels(gpu, freeDiskGB = gpu.freeDiskGB ?? null) {
+    return assessNimModels(gpu, freeDiskGB)
+        .filter((assessment) => assessment.status !== "unsupported")
+        .map((assessment) => assessment.model);
+}
+function getRecommendedModels(gpu, freeDiskGB = gpu.freeDiskGB ?? null) {
+    return assessNimModels(gpu, freeDiskGB)
+        .filter((assessment) => assessment.status === "recommended")
+        .map((assessment) => assessment.model);
+}
+function resolveRunningNimModel(runtime, requestedModel, port = 8000) {
+    const fallback = getServedModelForModel(requestedModel);
+    const output = tryExec(runtime, `curl -sf http://localhost:${String(port)}/v1/models 2>/dev/null`);
+    if (!output) {
+        return fallback;
+    }
+    try {
+        const parsed = JSON.parse(output);
+        const ids = (parsed.data ?? [])
+            .map((entry) => entry.id?.trim())
+            .filter((value) => Boolean(value));
+        if (ids.includes(requestedModel)) {
+            return requestedModel;
+        }
+        if (ids.includes(fallback)) {
+            return fallback;
+        }
+        if (ids.length === 1) {
+            return ids[0];
+        }
+    }
+    catch { }
+    return fallback;
 }
 function startNimContainer(sandboxName, model, runtime, port = 8000, imageOverride) {
     const name = containerName(sandboxName);

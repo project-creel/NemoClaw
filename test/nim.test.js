@@ -44,6 +44,7 @@ describe("nim", () => {
         nim.getServedModelForModel("nvidia/nemotron-3-nano-30b-a3b"),
         "nvidia/nemotron-3-nano"
       );
+      assert.equal(nim.getServedModelForModel("z-ai/glm5"), "zai-org/GLM-5");
     });
 
     it("returns the original model id when no alias is needed", () => {
@@ -155,13 +156,53 @@ describe("nim", () => {
         models.map((model) => model.name),
         [
           "nvidia/nemotron-3-nano-30b-a3b",
-          "deepseek-ai/deepseek-r1-distill-qwen-32b",
           "nvidia/llama-3.3-nemotron-super-49b-v1.5",
           "qwen/qwen3-coder-next",
+          "deepseek-ai/deepseek-r1-distill-qwen-32b",
           "qwen/qwen3.5-35b-a3b",
           "qwen/qwen3.5-122b-a10b",
         ]
       );
+    });
+  });
+
+  describe("assessNimModels", () => {
+    it("marks compatible models as recommended or supported and explains exclusions", () => {
+      const assessments = nim.assessNimModels(
+        {
+          type: "nvidia",
+          count: 1,
+          totalMemoryMB: 46068,
+          perGpuMB: 46068,
+          family: "l40s",
+          families: ["l40s"],
+          freeDiskGB: 120,
+          nimCapable: true,
+        },
+        120
+      );
+
+      assert.equal(assessments[0].model.name, "nvidia/nemotron-3-nano-30b-a3b");
+      assert.equal(assessments[0].status, "recommended");
+      assert.match(
+        assessments.find((assessment) => assessment.model.name === "openai/gpt-oss-20b").reason,
+        /GPU family/
+      );
+    });
+  });
+
+  describe("resolveRunningNimModel", () => {
+    it("prefers the served id exposed by the running container", () => {
+      const runnerPath = path.join(__dirname, "..", "bin", "lib", "runner.js");
+      const runner = require(runnerPath);
+      const originalRunCapture = runner.runCapture;
+      runner.runCapture = () => '{"data":[{"id":"zai-org/GLM-5"}]}';
+
+      try {
+        assert.equal(nim.resolveRunningNimModel("z-ai/glm5"), "zai-org/GLM-5");
+      } finally {
+        runner.runCapture = originalRunCapture;
+      }
     });
   });
 

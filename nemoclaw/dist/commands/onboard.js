@@ -127,7 +127,8 @@ function detectLocalNim() {
     if (!gpu || !gpu.nimCapable) {
         return { available: false, reason: "No NIM-capable NVIDIA GPU detected" };
     }
-    const compatibleModels = (0, nim_js_1.getCompatibleModels)(gpu, gpu.freeDiskGB ?? null);
+    const assessments = (0, nim_js_1.assessNimModels)(gpu, gpu.freeDiskGB ?? null);
+    const compatibleModels = assessments.filter((assessment) => assessment.status !== "unsupported");
     if (compatibleModels.length === 0) {
         return {
             available: false,
@@ -139,13 +140,41 @@ function detectLocalNim() {
         gpuSummary: `${Math.floor(gpu.totalMemoryMB / 1024)} GB VRAM, ${String(compatibleModels.length)} supported model(s)`,
     };
 }
-function getCompatibleNimModels() {
+function getNimModelAssessments() {
     const runtime = (0, nim_js_1.createNimRuntime)();
     const gpu = (0, nim_js_1.detectGpu)(runtime);
     if (!gpu || !gpu.nimCapable) {
         return [];
     }
-    return (0, nim_js_1.getCompatibleModels)(gpu, gpu.freeDiskGB ?? null);
+    return (0, nim_js_1.assessNimModels)(gpu, gpu.freeDiskGB ?? null);
+}
+function formatNimAssessmentLabel(assessment) {
+    const badge = assessment.status === "recommended" ? "recommended" : "supported";
+    const tags = assessment.model.recommendedFor?.length ? ` [${assessment.model.recommendedFor.join(", ")}]` : "";
+    return `${assessment.model.name} (${badge}; ${assessment.reason})${tags}`;
+}
+function logNimAssessmentSummary(assessments, logger) {
+    const recommended = assessments.filter((assessment) => assessment.status === "recommended");
+    const supported = assessments.filter((assessment) => assessment.status === "supported");
+    const unsupported = assessments.filter((assessment) => assessment.status === "unsupported").slice(0, 5);
+    if (recommended.length > 0) {
+        logger.info("Recommended local NIM models for this machine:");
+        for (const assessment of recommended) {
+            logger.info(`  - ${assessment.model.name}: ${assessment.reason}`);
+        }
+    }
+    if (supported.length > 0) {
+        logger.info("Also supported:");
+        for (const assessment of supported) {
+            logger.info(`  - ${assessment.model.name}: ${assessment.reason}`);
+        }
+    }
+    if (unsupported.length > 0) {
+        logger.info("Not offered:");
+        for (const assessment of unsupported) {
+            logger.info(`  - ${assessment.model.name}: ${assessment.reason}`);
+        }
+    }
 }
 function showConfig(config, logger) {
     logger.info(`  Endpoint:    ${(0, config_js_1.describeOnboardEndpoint)(config)}`);
@@ -348,12 +377,18 @@ async function cliOnboard(opts) {
         model = opts.model;
     }
     else {
+        const nimAssessments = endpointType === "nim-local" ? getNimModelAssessments() : [];
+        if (endpointType === "nim-local" && nimAssessments.length > 0) {
+            logNimAssessmentSummary(nimAssessments, logger);
+        }
         const discoveredModelOptions = endpointType === "ollama"
             ? (0, local_inference_js_1.getOllamaModelOptions)(runCapture).map((id) => ({ label: id, value: id }))
             : endpointType === "nim-local"
-                ? getCompatibleNimModels().map((nimModel) => ({
-                    label: `${nimModel.name}${nimModel.recommendedFor?.length ? ` [${nimModel.recommendedFor.join(", ")}]` : ""}`,
-                    value: nimModel.name,
+                ? nimAssessments
+                    .filter((assessment) => assessment.status !== "unsupported")
+                    .map((assessment) => ({
+                    label: formatNimAssessmentLabel(assessment),
+                    value: assessment.model.name,
                 }))
                 : validation.models.map((id) => ({ label: id, value: id }));
         const curatedCloudOptions = endpointType === "build" || endpointType === "ncp"
@@ -420,9 +455,10 @@ async function cliOnboard(opts) {
             logger.error("Local NIM requires an NVIDIA GPU and a running Docker daemon.");
             return;
         }
-        const supportedModels = (0, nim_js_1.getCompatibleModels)(gpu, gpu.freeDiskGB ?? null);
-        if (!supportedModels.some((nimModel) => nimModel.name === model)) {
-            logger.error(`Selected model '${model}' does not match the detected GPU/disk profile (${String(Math.floor(gpu.totalMemoryMB / 1024))} GB VRAM${gpu.freeDiskGB ? `, ${String(gpu.freeDiskGB)} GB free disk` : ""}).`);
+        const assessments = (0, nim_js_1.assessNimModels)(gpu, gpu.freeDiskGB ?? null);
+        const selectedAssessment = assessments.find((assessment) => assessment.model.name === model);
+        if (!selectedAssessment || selectedAssessment.status === "unsupported") {
+            logger.error(`Selected model '${model}' does not match the detected GPU/disk profile (${String(Math.floor(gpu.totalMemoryMB / 1024))} GB VRAM${gpu.freeDiskGB ? `, ${String(gpu.freeDiskGB)} GB free disk` : ""}). ${selectedAssessment?.reason ?? ""}`.trim());
             return;
         }
         logger.info(`Pulling local NIM image for ${model}...`);
@@ -441,7 +477,7 @@ async function cliOnboard(opts) {
             logger.error("Local NIM did not become healthy on http://localhost:8000/v1.");
             return;
         }
-        model = (0, nim_js_1.getServedModelForModel)(model);
+        model = (0, nim_js_1.resolveRunningNimModel)(runtime, model, 8000);
         const providerValidation = (0, local_inference_js_1.validateLocalProvider)("nim-local", runCapture);
         if (!providerValidation.ok) {
             logger.error(providerValidation.message ?? "Local NIM is unavailable.");

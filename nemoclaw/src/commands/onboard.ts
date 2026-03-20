@@ -19,13 +19,14 @@ import {
   validateLocalProvider,
 } from "../onboard/local-inference.js";
 import {
+  assessNimModels,
   createNimRuntime,
   detectGpu,
-  getCompatibleModels,
-  getServedModelForModel,
   pullNimImage,
+  resolveRunningNimModel,
   startNimContainer,
   waitForNimHealth,
+  type NimModelAssessment,
 } from "../onboard/nim.js";
 import { promptInput, promptConfirm, promptSelect } from "../onboard/prompt.js";
 import { validateApiKey, maskApiKey } from "../onboard/validate.js";
@@ -167,7 +168,8 @@ function detectLocalNim(): { available: boolean; gpuSummary?: string; reason?: s
     return { available: false, reason: "No NIM-capable NVIDIA GPU detected" };
   }
 
-  const compatibleModels = getCompatibleModels(gpu, gpu.freeDiskGB ?? null);
+  const assessments = assessNimModels(gpu, gpu.freeDiskGB ?? null);
+  const compatibleModels = assessments.filter((assessment) => assessment.status !== "unsupported");
   if (compatibleModels.length === 0) {
     return {
       available: false,
@@ -181,13 +183,46 @@ function detectLocalNim(): { available: boolean; gpuSummary?: string; reason?: s
   };
 }
 
-function getCompatibleNimModels() {
+function getNimModelAssessments() {
   const runtime = createNimRuntime();
   const gpu = detectGpu(runtime);
   if (!gpu || !gpu.nimCapable) {
     return [];
   }
-  return getCompatibleModels(gpu, gpu.freeDiskGB ?? null);
+  return assessNimModels(gpu, gpu.freeDiskGB ?? null);
+}
+
+function formatNimAssessmentLabel(assessment: NimModelAssessment): string {
+  const badge = assessment.status === "recommended" ? "recommended" : "supported";
+  const tags = assessment.model.recommendedFor?.length ? ` [${assessment.model.recommendedFor.join(", ")}]` : "";
+  return `${assessment.model.name} (${badge}; ${assessment.reason})${tags}`;
+}
+
+function logNimAssessmentSummary(assessments: NimModelAssessment[], logger: PluginLogger): void {
+  const recommended = assessments.filter((assessment) => assessment.status === "recommended");
+  const supported = assessments.filter((assessment) => assessment.status === "supported");
+  const unsupported = assessments.filter((assessment) => assessment.status === "unsupported").slice(0, 5);
+
+  if (recommended.length > 0) {
+    logger.info("Recommended local NIM models for this machine:");
+    for (const assessment of recommended) {
+      logger.info(`  - ${assessment.model.name}: ${assessment.reason}`);
+    }
+  }
+
+  if (supported.length > 0) {
+    logger.info("Also supported:");
+    for (const assessment of supported) {
+      logger.info(`  - ${assessment.model.name}: ${assessment.reason}`);
+    }
+  }
+
+  if (unsupported.length > 0) {
+    logger.info("Not offered:");
+    for (const assessment of unsupported) {
+      logger.info(`  - ${assessment.model.name}: ${assessment.reason}`);
+    }
+  }
 }
 
 function showConfig(config: NemoClawOnboardConfig, logger: PluginLogger): void {
@@ -434,13 +469,19 @@ export async function cliOnboard(opts: OnboardOptions): Promise<void> {
   if (opts.model) {
     model = opts.model;
   } else {
+    const nimAssessments = endpointType === "nim-local" ? getNimModelAssessments() : [];
+    if (endpointType === "nim-local" && nimAssessments.length > 0) {
+      logNimAssessmentSummary(nimAssessments, logger);
+    }
     const discoveredModelOptions =
       endpointType === "ollama"
         ? getOllamaModelOptions(runCapture).map((id) => ({ label: id, value: id }))
         : endpointType === "nim-local"
-        ? getCompatibleNimModels().map((nimModel) => ({
-              label: `${nimModel.name}${nimModel.recommendedFor?.length ? ` [${nimModel.recommendedFor.join(", ")}]` : ""}`,
-              value: nimModel.name,
+        ? nimAssessments
+            .filter((assessment) => assessment.status !== "unsupported")
+            .map((assessment) => ({
+              label: formatNimAssessmentLabel(assessment),
+              value: assessment.model.name,
             }))
         : validation.models.map((id) => ({ label: id, value: id }));
     const curatedCloudOptions =
@@ -524,10 +565,11 @@ export async function cliOnboard(opts: OnboardOptions): Promise<void> {
       return;
     }
 
-    const supportedModels = getCompatibleModels(gpu, gpu.freeDiskGB ?? null);
-    if (!supportedModels.some((nimModel) => nimModel.name === model)) {
+    const assessments = assessNimModels(gpu, gpu.freeDiskGB ?? null);
+    const selectedAssessment = assessments.find((assessment) => assessment.model.name === model);
+    if (!selectedAssessment || selectedAssessment.status === "unsupported") {
       logger.error(
-        `Selected model '${model}' does not match the detected GPU/disk profile (${String(Math.floor(gpu.totalMemoryMB / 1024))} GB VRAM${gpu.freeDiskGB ? `, ${String(gpu.freeDiskGB)} GB free disk` : ""}).`,
+        `Selected model '${model}' does not match the detected GPU/disk profile (${String(Math.floor(gpu.totalMemoryMB / 1024))} GB VRAM${gpu.freeDiskGB ? `, ${String(gpu.freeDiskGB)} GB free disk` : ""}). ${selectedAssessment?.reason ?? ""}`.trim(),
       );
       return;
     }
@@ -549,7 +591,7 @@ export async function cliOnboard(opts: OnboardOptions): Promise<void> {
       return;
     }
 
-    model = getServedModelForModel(model);
+    model = resolveRunningNimModel(runtime, model, 8000);
 
     const providerValidation = validateLocalProvider("nim-local", runCapture);
     if (!providerValidation.ok) {

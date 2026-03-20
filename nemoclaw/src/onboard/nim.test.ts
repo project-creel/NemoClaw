@@ -3,10 +3,13 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  assessNimModels,
   containerName,
   detectGpu,
   getCompatibleModels,
   getImageForModel,
+  getRecommendedModels,
+  resolveRunningNimModel,
   getServedModelForModel,
   listModels,
   pullNimImage,
@@ -52,6 +55,7 @@ describe("nim helpers", () => {
 
   it("maps aliased local NIM selections to the live API model id", () => {
     expect(getServedModelForModel("nvidia/nemotron-3-nano-30b-a3b")).toBe("nvidia/nemotron-3-nano");
+    expect(getServedModelForModel("z-ai/glm5")).toBe("zai-org/GLM-5");
     expect(getServedModelForModel("nvidia/nemotron-3-super-120b-a12b")).toBe(
       "nvidia/nemotron-3-super-120b-a12b",
     );
@@ -223,7 +227,46 @@ describe("nim helpers", () => {
     ).toEqual(["nvidia/nemotron-3-nano-30b-a3b"]);
   });
 
-  it("maps local GLM selection to the served model id exposed by the container", () => {
-    expect(getServedModelForModel("z-ai/glm5")).toBe("zai-org/GLM-5");
+  it("classifies local NIM models as recommended, supported, or unsupported with reasons", () => {
+    const assessments = assessNimModels({
+      type: "nvidia",
+      count: 1,
+      totalMemoryMB: 46068,
+      perGpuMB: 46068,
+      family: "l40s",
+      families: ["l40s"],
+      freeDiskGB: 120,
+      nimCapable: true,
+    });
+
+    expect(assessments[0]?.model.name).toBe("nvidia/nemotron-3-nano-30b-a3b");
+    expect(assessments[0]?.status).toBe("recommended");
+    expect(assessments.some((assessment) => assessment.status === "unsupported")).toBe(true);
+    expect(assessments.find((assessment) => assessment.model.name === "openai/gpt-oss-20b")?.reason).toContain(
+      "GPU family",
+    );
+  });
+
+  it("returns only recommended models from the assessment list", () => {
+    expect(
+      getRecommendedModels({
+        type: "nvidia",
+        count: 1,
+        totalMemoryMB: 46068,
+        perGpuMB: 46068,
+        family: "l40s",
+        families: ["l40s"],
+        freeDiskGB: 120,
+        nimCapable: true,
+      }).map((model) => model.name),
+    ).toEqual(["nvidia/nemotron-3-nano-30b-a3b"]);
+  });
+
+  it("resolves the running model id from the local NIM models endpoint", () => {
+    const runtime = runtimeWithResponses({
+      "curl -sf http://localhost:8000/v1/models":
+        '{"data":[{"id":"zai-org/GLM-5"}]}',
+    });
+    expect(resolveRunningNimModel(runtime, "z-ai/glm5")).toBe("zai-org/GLM-5");
   });
 });
