@@ -27,6 +27,9 @@ os.makedirs(os.path.dirname(config_path), exist_ok=True)
 
 cfg = {}
 if os.path.exists(config_path):
+    if not os.access(config_path, os.W_OK):
+        print('[config] openclaw.json is locked from a previous run, skipping config update')
+        raise SystemExit(0)
     with open(config_path) as f:
         cfg = json.load(f)
 
@@ -83,29 +86,43 @@ lock_gateway_config() {
   # Lock openclaw.json so the sandboxed agent cannot modify auth tokens,
   # CORS origins, or other gateway security settings.  Uses a narrow
   # sudoers entry to escalate to root for the chown/chmod only.
-  # In the standard path, polls for the gateway to finish writing the
-  # auth token before locking to avoid a race condition.
+  #
+  # Usage: lock_gateway_config [wait_for_token]
+  #   wait_for_token  — "true" (default) polls up to 30s for the gateway
+  #                     to write its auth token before locking.  Pass
+  #                     "false" in the exec path where no gateway is running.
   # Ref: https://github.com/NVIDIA/NemoClaw/issues/514
-  local config_path
+  local config_path wait_for_token
   config_path="${HOME:-/sandbox}/.openclaw/openclaw.json"
+  wait_for_token="${1:-true}"
 
   if [ ! -f "$config_path" ]; then
     return
   fi
 
-  # Wait for the gateway to finish its initial config write (token generation).
-  # In the exec path the gateway hasn't started yet so this exits immediately.
-  local i
-  for i in $(seq 1 30); do
-    if python3 -c "
+  # Already locked from a previous run (container restart).  The sudoers
+  # entry is gone too, so skip gracefully.
+  if [ ! -w "$config_path" ]; then
+    echo "[security] gateway config already locked: $config_path"
+    return
+  fi
+
+  # In the standard path, wait for the gateway to finish its initial config
+  # write (token generation) before locking.  Skip in the exec path where
+  # no gateway is running — avoids a 30s hang.
+  if [ "$wait_for_token" = "true" ]; then
+    local i
+    for i in $(seq 1 30); do
+      if python3 -c "
 import json, sys
 cfg = json.load(open('$config_path'))
 sys.exit(0 if cfg.get('gateway',{}).get('auth',{}).get('token') else 1)
 " 2>/dev/null; then
-      break
-    fi
-    sleep 1
-  done
+        break
+      fi
+      sleep 1
+    done
+  fi
 
   sudo /usr/local/bin/lock-gateway-config
   echo "[security] gateway config locked: $config_path"
@@ -208,7 +225,7 @@ fix_openclaw_config
 openclaw plugins install /opt/nemoclaw > /dev/null 2>&1 || true
 
 if [ ${#NEMOCLAW_CMD[@]} -gt 0 ]; then
-  lock_gateway_config
+  lock_gateway_config false
   exec "${NEMOCLAW_CMD[@]}"
 fi
 
