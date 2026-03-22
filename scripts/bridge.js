@@ -23,67 +23,9 @@ const fs = require("fs");
 const path = require("path");
 const { runAgentInSandbox, SANDBOX } = require("./bridge-core");
 
+const yaml = require("js-yaml");
+
 const BRIDGES_DIR = path.join(__dirname, "..", "nemoclaw-blueprint", "bridges");
-
-// ── YAML parser (minimal, no dependency) ──────────────────────────
-
-function parseYaml(text) {
-  // Simple YAML parser for flat/nested key-value configs.
-  // Handles: scalars, nested objects, arrays of scalars. No anchors/aliases.
-  const result = {};
-  const stack = [{ obj: result, indent: -1 }];
-
-  for (const raw of text.split("\n")) {
-    if (raw.trim() === "" || raw.trim().startsWith("#")) continue;
-
-    const indent = raw.search(/\S/);
-    const line = raw.trim();
-
-    // Pop stack to matching indent level
-    while (stack.length > 1 && stack[stack.length - 1].indent >= indent) {
-      stack.pop();
-    }
-    const parent = stack[stack.length - 1].obj;
-
-    // Array item
-    if (line.startsWith("- ")) {
-      const val = line.slice(2).trim();
-      const lastKey = Object.keys(parent).pop();
-      if (lastKey && !Array.isArray(parent[lastKey])) {
-        parent[lastKey] = [];
-      }
-      if (lastKey) parent[lastKey].push(unquote(val));
-      continue;
-    }
-
-    const colonIdx = line.indexOf(":");
-    if (colonIdx === -1) continue;
-
-    const key = line.slice(0, colonIdx).trim();
-    const valPart = line.slice(colonIdx + 1).trim();
-
-    if (valPart === "" || valPart === "|") {
-      // Nested object
-      parent[key] = {};
-      stack.push({ obj: parent[key], indent });
-    } else {
-      parent[key] = unquote(valPart);
-    }
-  }
-
-  return result;
-}
-
-function unquote(s) {
-  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
-    return s.slice(1, -1);
-  }
-  if (s === "true") return true;
-  if (s === "false") return false;
-  const n = Number(s);
-  if (!isNaN(n) && s !== "") return n;
-  return s;
-}
 
 // ── Load bridge configs ───────────────────────────────────────────
 
@@ -98,7 +40,7 @@ function loadBridgeConfigs() {
     for (const file of fs.readdirSync(typePath)) {
       if (!file.endsWith(".yaml") && !file.endsWith(".yml")) continue;
       const content = fs.readFileSync(path.join(typePath, file), "utf-8");
-      const parsed = parseYaml(content);
+      const parsed = yaml.load(content);
       if (parsed.bridge) configs.push(parsed.bridge);
     }
   }
