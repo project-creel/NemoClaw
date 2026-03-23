@@ -22,7 +22,7 @@ status: published
 
 The `nemoclaw` CLI is the primary interface for managing NemoClaw sandboxes. It is installed when you run `npm install -g nemoclaw`.
 
-### `/nemoclaw` Slash Command
+## `/nemoclaw` Slash Command
 
 The `/nemoclaw` slash command is available inside the OpenClaw chat interface for quick actions:
 
@@ -103,6 +103,12 @@ $ nemoclaw my-assistant logs [--follow]
 
 Stop the NIM container and delete the sandbox.
 This removes the sandbox from the registry.
+
+:::{warning}
+Destroying a sandbox permanently deletes all files inside it, including
+[workspace files](../workspace/workspace-files.md) (SOUL.md, USER.md, IDENTITY.md, AGENTS.md, MEMORY.md, and daily memory notes).
+Back up your workspace first by following the instructions at [Back Up and Restore](../workspace/backup-restore.md).
+:::
 
 ```console
 $ nemoclaw my-assistant destroy

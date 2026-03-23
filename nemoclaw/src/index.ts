@@ -133,7 +133,9 @@ export interface NemoClawConfig {
   inferenceProvider: string;
 }
 
-function activeModelEntries(onboardCfg: ReturnType<typeof loadOnboardConfig>): ModelProviderEntry[] {
+function activeModelEntries(
+  onboardCfg: ReturnType<typeof loadOnboardConfig>,
+): ModelProviderEntry[] {
   if (!onboardCfg?.model) {
     return [
       {
@@ -188,7 +190,14 @@ function registeredProviderForConfig(
     aliases: ["inference-local", "nemoclaw"],
     envVars: [providerCredentialEnv],
     models: { chat: activeModelEntries(onboardCfg) },
-    auth: [{ type: "bearer", envVar: providerCredentialEnv, headerName: "Authorization", label: authLabel }],
+    auth: [
+      {
+        type: "bearer",
+        envVar: providerCredentialEnv,
+        headerName: "Authorization",
+        label: authLabel,
+      },
+    ],
   };
 }
 
@@ -240,7 +249,7 @@ export default function register(api: OpenClawPluginApi): void {
   api.registerProvider(registeredProviderForConfig(onboardCfg, providerCredentialEnv));
 
   const bannerEndpoint = onboardCfg ? describeOnboardEndpoint(onboardCfg) : "build.nvidia.com";
-  const bannerProvider = onboardCfg ? describeOnboardProvider(onboardCfg) : "NVIDIA Cloud API";
+  const bannerProvider = onboardCfg ? describeOnboardProvider(onboardCfg) : "NVIDIA Endpoint API";
   const bannerModel = onboardCfg?.model ?? "nvidia/nemotron-3-super-120b-a12b";
 
   api.logger.info("");

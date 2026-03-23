@@ -83,10 +83,10 @@ If `nemoclaw` is not found after install, run `source ~/.bashrc` (or `source ~/.
 
 When the install completes, a summary confirms the running environment:
 
-```
+```text
 ──────────────────────────────────────────────────
 Sandbox      my-assistant (Landlock + seccomp + netns)
-Model        nvidia/nemotron-3-super-120b-a12b (NVIDIA Cloud API)
+Model        nvidia/nemotron-3-super-120b-a12b (NVIDIA Endpoint API)
 ──────────────────────────────────────────────────
 Run:         nemoclaw my-assistant connect
 Status:      nemoclaw my-assistant status
@@ -169,7 +169,7 @@ NemoClaw installs the NVIDIA OpenShell runtime and Nemotron models, then uses a 
 | **Plugin**       | TypeScript CLI commands for launch, connect, status, and logs.                            |
 | **Blueprint**    | Versioned Python artifact that orchestrates sandbox creation, policy, and inference setup. |
 | **Sandbox**      | Isolated OpenShell container running OpenClaw with policy-enforced egress and filesystem.  |
-| **Inference**    | NVIDIA cloud model calls, routed through the OpenShell gateway, transparent to the agent.  |
+| **Inference**    | NVIDIA Endpoint model calls, routed through the OpenShell gateway, transparent to the agent.  |
 
 The blueprint lifecycle follows four stages: resolve the artifact, verify its digest, plan the resources, and apply through the OpenShell CLI.
 
@@ -179,11 +179,11 @@ When something goes wrong, errors may originate from either NemoClaw or the Open
 
 ## Inference
 
-Inference requests from the agent never leave the sandbox directly. OpenShell intercepts every call and routes it to the NVIDIA cloud provider.
+Inference requests from the agent never leave the sandbox directly. OpenShell intercepts every call and routes it to the NVIDIA Endpoint provider.
 
 | Provider     | Model                               | Use Case                                       |
 |--------------|--------------------------------------|-------------------------------------------------|
-| NVIDIA cloud | `nvidia/nemotron-3-super-120b-a12b` | Production. Requires an NVIDIA API key.         |
+| NVIDIA Endpoint | `nvidia/nemotron-3-super-120b-a12b` | Production. Requires an NVIDIA API key.         |
 
 Get an API key from [build.nvidia.com](https://build.nvidia.com). The `nemoclaw onboard` command prompts for this key during setup.
 
@@ -193,7 +193,7 @@ Local inference options such as Ollama and vLLM are still experimental. On macOS
 
 ## Protection Layers
 
-The sandbox starts with a strict baseline policy that controls network egress and filesystem access:
+The sandbox starts with a default policy that controls network egress and filesystem access:
 
 | Layer      | What it protects                                    | When it applies             |
 |------------|-----------------------------------------------------|-----------------------------|
@@ -203,6 +203,28 @@ The sandbox starts with a strict baseline policy that controls network egress an
 | Inference  | Reroutes model API calls to controlled backends.    | Hot-reloadable at runtime.  |
 
 When the agent tries to reach an unlisted host, OpenShell blocks the request and surfaces it in the TUI for operator approval.
+
+---
+
+## Configuring Sandbox Policy
+
+The sandbox policy is defined in a declarative YAML file and enforced by the OpenShell runtime.
+NemoClaw ships a default policy in [`nemoclaw-blueprint/policies/openclaw-sandbox.yaml`](https://github.com/NVIDIA/NemoClaw/blob/main/nemoclaw-blueprint/policies/openclaw-sandbox.yaml) that denies all network egress except explicitly listed endpoints.
+
+Operators can customize the policy in two ways:
+
+| Method | How | Scope |
+|--------|-----|-------|
+| **Static** | Edit `openclaw-sandbox.yaml` and re-run `nemoclaw onboard`. | Persists across restarts. |
+| **Dynamic** | Run `openshell policy set <policy-file>` on a running sandbox. | Session only; resets on restart. |
+
+NemoClaw includes preset policy files for common integrations such as PyPI, Docker Hub, Slack, and Jira in `nemoclaw-blueprint/policies/presets/`. Apply a preset as-is or use it as a starting template.
+
+NemoClaw is an open project — we are still determining which presets to ship by default. If you have suggestions, please open an [issue](https://github.com/NVIDIA/NemoClaw/issues) or [discussion](https://github.com/NVIDIA/NemoClaw/discussions).
+
+When the agent attempts to reach an endpoint not covered by the policy, OpenShell blocks the request and surfaces it in the TUI (`openshell term`) for the operator to approve or deny in real time. Approved endpoints persist for the current session only.
+
+For step-by-step instructions, see [Customize Network Policy](https://docs.nvidia.com/nemoclaw/latest/network-policy/customize-network-policy.html). For the underlying enforcement details, see the OpenShell [Policy Schema](https://docs.nvidia.com/openshell/latest/reference/policy-schema.html) and [Sandbox Policies](https://docs.nvidia.com/openshell/latest/sandboxes/policies.html) documentation.
 
 ---
 
@@ -219,7 +241,7 @@ Run these on the host to set up, connect to, and manage sandboxes.
 | `openshell term`                     | Launch the OpenShell TUI for monitoring and approvals. |
 | `nemoclaw start` / `stop` / `status` | Manage auxiliary services (Telegram bridge, tunnel).   |
 
-See the full [CLI reference](https://docs.nvidia.com/nemoclaw/latest/reference/commands.md) for all commands, flags, and options.
+See the full [CLI reference](https://docs.nvidia.com/nemoclaw/latest/reference/commands.html) for all commands, flags, and options.
 
 ---
 
@@ -230,7 +252,7 @@ Refer to the documentation for more information on NemoClaw.
 - [Overview](https://docs.nvidia.com/nemoclaw/latest/about/overview.html): Learn what NemoClaw does and how it fits together.
 - [How It Works](https://docs.nvidia.com/nemoclaw/latest/about/how-it-works.html): Learn about the plugin, blueprint, and sandbox lifecycle.
 - [Architecture](https://docs.nvidia.com/nemoclaw/latest/reference/architecture.html): Learn about the plugin structure, blueprint lifecycle, and sandbox environment.
-- [Inference Profiles](https://docs.nvidia.com/nemoclaw/latest/reference/inference-profiles.html): Learn about the NVIDIA cloud inference configuration.
+- [Inference Profiles](https://docs.nvidia.com/nemoclaw/latest/reference/inference-profiles.html): Learn about the NVIDIA Endpoint inference configuration.
 - [Network Policies](https://docs.nvidia.com/nemoclaw/latest/reference/network-policies.html): Learn about egress control and policy customization.
 - [CLI Commands](https://docs.nvidia.com/nemoclaw/latest/reference/commands.html): Learn about the full command reference.
 - [Troubleshooting](https://docs.nvidia.com/nemoclaw/latest/reference/troubleshooting.html): Troubleshoot common issues and resolution steps.
