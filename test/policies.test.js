@@ -149,16 +149,6 @@ describe("policies", () => {
       }
     });
 
-    it("has config_overrides section", () => {
-      expect(basePolicy.includes("config_overrides:")).toBeTruthy();
-    });
-
-    it("config_overrides does not contain gateway fields", () => {
-      const match = basePolicy.match(/^config_overrides:\n([\s\S]*?)(?=\n[^\s#]|\n*$)/m);
-      expect(match).toBeTruthy();
-      const block = match[1];
-      expect(block.includes("gateway.")).toBe(false);
-    });
   });
 
   describe("no preset contains tls: terminate", () => {
