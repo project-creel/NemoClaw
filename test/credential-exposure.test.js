@@ -7,18 +7,24 @@
 // there is no reason to pass the secret itself on the command line where it
 // would be visible in `ps aux` output.
 
-"use strict";
+import fs from "node:fs";
+import path from "node:path";
+import { describe, it, expect } from "vitest";
 
-const fs = require("node:fs");
-const path = require("node:path");
-
-const ONBOARD_JS = path.join(__dirname, "..", "bin", "lib", "onboard.js");
-const RUNNER_PY = path.join(
-  __dirname,
+const ONBOARD_JS = path.join(
+  import.meta.dirname,
   "..",
-  "nemoclaw-blueprint",
-  "orchestrator",
-  "runner.py",
+  "bin",
+  "lib",
+  "onboard.js",
+);
+const RUNNER_TS = path.join(
+  import.meta.dirname,
+  "..",
+  "nemoclaw",
+  "src",
+  "blueprint",
+  "runner.ts",
 );
 
 // Matches --credential followed by a value containing "=" (i.e. KEY=VALUE).
@@ -27,7 +33,8 @@ const RUNNER_PY = path.join(
 // NOTE: unquoted forms like `--credential KEY=VALUE` would not be detected.
 const JS_EXPOSURE_RE = /--credential\s+[^"]*"[A-Z_]+=/;
 const JS_CREDENTIAL_CONCAT_RE = /--credential.*=.*process\.env\./;
-const PY_EXPOSURE_RE = /--credential.*=.*\{/;
+// TS pattern: --credential with template literal interpolation containing "="
+const TS_EXPOSURE_RE = /--credential.*=.*\$\{/;
 
 describe("credential exposure in process arguments", () => {
   it("onboard.js must not pass KEY=VALUE to --credential", () => {
@@ -44,15 +51,15 @@ describe("credential exposure in process arguments", () => {
     expect(violations).toEqual([]);
   });
 
-  it("runner.py must not pass KEY=VALUE to --credential", () => {
-    const src = fs.readFileSync(RUNNER_PY, "utf-8");
+  it("runner.ts must not pass KEY=VALUE to --credential", () => {
+    const src = fs.readFileSync(RUNNER_TS, "utf-8");
     const lines = src.split("\n");
 
     const violations = lines.filter(
       (line) =>
-        PY_EXPOSURE_RE.test(line) &&
+        TS_EXPOSURE_RE.test(line) &&
         line.includes("--credential") &&
-        !line.trimStart().startsWith("#"),
+        !line.trimStart().startsWith("//"),
     );
 
     expect(violations).toEqual([]);
@@ -61,23 +68,26 @@ describe("credential exposure in process arguments", () => {
   it("onboard.js --credential flags pass env var names only", () => {
     const src = fs.readFileSync(ONBOARD_JS, "utf-8");
 
-    // Find all --credential arguments and verify they contain only a key name
-    // (no "=" sign in the credential value)
-    const credentialArgs = src.match(/--credential\s+"([^"]+)"/g) || [];
-    const credentialShellQuote =
-      src.match(/--credential\s+\$\{shellQuote\("([^"]+)"\)\}/g) || [];
+    expect(src).toMatch(/"--credential", credentialEnv/);
+    expect(src).not.toMatch(/"--credential",\s*["'][A-Z_]+=/);
+    expect(src).not.toMatch(/"--credential",\s*process\.env\./);
+  });
 
-    const allArgs = [...credentialArgs, ...credentialShellQuote];
-    expect(allArgs.length).toBeGreaterThan(0);
+  it("onboard.js does not embed sandbox secrets in the sandbox create command line", () => {
+    const src = fs.readFileSync(ONBOARD_JS, "utf-8");
 
-    for (const arg of allArgs) {
-      // Extract the credential value from the match
-      const valueMatch =
-        arg.match(/--credential\s+"([^"]+)"/) ||
-        arg.match(/--credential\s+\$\{shellQuote\("([^"]+)"\)\}/);
-      if (valueMatch) {
-        expect(valueMatch[1]).not.toContain("=");
-      }
-    }
+    expect(src).toMatch(/const sandboxEnv = \{ \.\.\.process\.env \};/);
+    expect(src).toMatch(/streamSandboxCreate\(createCommand, sandboxEnv(?:, \{)?/);
+    expect(src).not.toMatch(/envArgs\.push\(formatEnvAssignment\("NVIDIA_API_KEY"/);
+    expect(src).not.toMatch(/envArgs\.push\(formatEnvAssignment\("DISCORD_BOT_TOKEN"/);
+    expect(src).not.toMatch(/envArgs\.push\(formatEnvAssignment\("SLACK_BOT_TOKEN"/);
+  });
+
+  it("onboard.js curl probes use explicit timeouts", () => {
+    const src = fs.readFileSync(ONBOARD_JS, "utf-8");
+
+    expect(src).toMatch(/function getCurlTimingArgs\(\)/);
+    expect(src).toMatch(/--connect-timeout 5/);
+    expect(src).toMatch(/--max-time 20/);
   });
 });
