@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-const nim = require("../bin/lib/nim");
+import { describe, it, expect } from "vitest";
+import nim from "../bin/lib/nim";
 
 describe("nim", () => {
   describe("listModels", () => {
@@ -21,7 +22,7 @@ describe("nim", () => {
 
   describe("getImageForModel", () => {
     it("returns correct image for known model", () => {
-      expect(nim.getImageForModel("nvidia/nemotron-3-nano-30b-a3b")).toBe("nvcr.io/nim/nvidia/nemotron-3-nano-30b-a3b:latest");
+      expect(nim.getImageForModel("nvidia/nemotron-3-nano-30b-a3b")).toBe("nvcr.io/nim/nvidia/nemotron-3-nano:latest");
     });
 
     it("returns null for unknown model", () => {

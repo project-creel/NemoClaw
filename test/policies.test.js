@@ -1,9 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-const path = require("path");
-
-const policies = require("../bin/lib/policies");
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { describe, it, expect } from "vitest";
+import policies from "../bin/lib/policies";
 
 describe("policies", () => {
   describe("listPresets", () => {
@@ -20,8 +22,21 @@ describe("policies", () => {
     });
 
     it("returns expected preset names", () => {
-      const names = policies.listPresets().map((p) => p.name).sort();
-      const expected = ["discord", "docker", "huggingface", "jira", "npm", "outlook", "pypi", "slack", "telegram"];
+      const names = policies
+        .listPresets()
+        .map((p) => p.name)
+        .sort();
+      const expected = [
+        "discord",
+        "docker",
+        "huggingface",
+        "jira",
+        "npm",
+        "outlook",
+        "pypi",
+        "slack",
+        "telegram",
+      ];
       expect(names).toEqual(expected);
     });
   });
@@ -70,33 +85,61 @@ describe("policies", () => {
 
   describe("buildPolicySetCommand", () => {
     it("shell-quotes sandbox name to prevent injection", () => {
-      const cmd = policies.buildPolicySetCommand("/tmp/policy.yaml", "my-assistant");
-      expect(cmd).toBe("openshell policy set --policy '/tmp/policy.yaml' --wait 'my-assistant'");
+      const cmd = policies.buildPolicySetCommand(
+        "/tmp/policy.yaml",
+        "my-assistant",
+      );
+      expect(cmd).toBe(
+        "openshell policy set --policy '/tmp/policy.yaml' --wait 'my-assistant'",
+      );
     });
 
     it("escapes shell metacharacters in sandbox name", () => {
-      const cmd = policies.buildPolicySetCommand("/tmp/policy.yaml", "test; whoami");
+      const cmd = policies.buildPolicySetCommand(
+        "/tmp/policy.yaml",
+        "test; whoami",
+      );
       expect(cmd.includes("'test; whoami'")).toBeTruthy();
     });
 
     it("places --wait before the sandbox name", () => {
-      const cmd = policies.buildPolicySetCommand("/tmp/policy.yaml", "test-box");
+      const cmd = policies.buildPolicySetCommand(
+        "/tmp/policy.yaml",
+        "test-box",
+      );
       const waitIdx = cmd.indexOf("--wait");
       const nameIdx = cmd.indexOf("'test-box'");
       expect(waitIdx < nameIdx).toBeTruthy();
+    });
+
+    it("uses the resolved openshell binary when provided by the installer path", () => {
+      process.env.NEMOCLAW_OPENSHELL_BIN = "/tmp/fake path/openshell";
+      try {
+        const cmd = policies.buildPolicySetCommand(
+          "/tmp/policy.yaml",
+          "my-assistant",
+        );
+        assert.equal(
+          cmd,
+          "'/tmp/fake path/openshell' policy set --policy '/tmp/policy.yaml' --wait 'my-assistant'",
+        );
+      } finally {
+        delete process.env.NEMOCLAW_OPENSHELL_BIN;
+      }
     });
   });
 
   describe("buildPolicyGetCommand", () => {
     it("shell-quotes sandbox name", () => {
       const cmd = policies.buildPolicyGetCommand("my-assistant");
-      expect(cmd).toBe("openshell policy get --full 'my-assistant' 2>/dev/null");
+      expect(cmd).toBe(
+        "openshell policy get --full 'my-assistant' 2>/dev/null",
+      );
     });
   });
 
   describe("base policy", () => {
-    const fs = require("fs");
-    const basePolicyPath = require("path").join(__dirname, "..", "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml");
+    const basePolicyPath = path.join(import.meta.dirname, "..", "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml");
     const basePolicy = fs.readFileSync(basePolicyPath, "utf-8");
 
     it("does not contain tls: terminate (deprecated in OpenShell >= 0.0.15)", () => {
@@ -146,7 +189,7 @@ describe("policies", () => {
           // rules: at 8+ space indent (inside an endpoint) is correct
           if (/^\s{4}rules:/.test(line)) {
             expect.unreachable(
-              `${p.name} line ${i + 1}: rules at policy level (should be inside endpoint)`
+              `${p.name} line ${i + 1}: rules at policy level (should be inside endpoint)`,
             );
           }
         }
@@ -157,6 +200,34 @@ describe("policies", () => {
       for (const p of policies.listPresets()) {
         const content = policies.loadPreset(p.name);
         expect(content.includes("network_policies:")).toBeTruthy();
+      }
+    });
+
+    it("package-manager presets use access: full (not tls: terminate)", () => {
+      // Package managers (pip, npm, yarn) use CONNECT tunneling which breaks
+      // under tls: terminate. Ensure these presets use access: full like the
+      // github policy in openclaw-sandbox.yaml.
+      const packagePresets = ["pypi", "npm"];
+      for (const name of packagePresets) {
+        const content = policies.loadPreset(name);
+        expect(content).toBeTruthy();
+        expect(content.includes("tls: terminate")).toBe(false);
+        expect(content.includes("access: full")).toBe(true);
+      }
+    });
+
+    it("package-manager presets include binaries section", () => {
+      // Without binaries, the proxy can't match pip/npm traffic to the policy
+      // and returns 403.
+      const packagePresets = [
+        { name: "pypi", expectedBinary: "python" },
+        { name: "npm", expectedBinary: "npm" },
+      ];
+      for (const { name, expectedBinary } of packagePresets) {
+        const content = policies.loadPreset(name);
+        expect(content).toBeTruthy();
+        expect(content.includes("binaries:")).toBe(true);
+        expect(content.includes(expectedBinary)).toBe(true);
       }
     });
   });
