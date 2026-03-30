@@ -1623,18 +1623,16 @@ async function startGatewayWithOptions(_gpu, { exitOnFailure = true } = {}) {
   const retries = exitOnFailure ? 2 : 0;
   try {
     await pRetry(() => {
-      const startResult = runOpenshell(["gateway", "start", ...gwArgs], { ignoreError: true, env: gatewayEnv });
+      runOpenshell(["gateway", "start", ...gwArgs], { ignoreError: true, env: gatewayEnv });
 
-      if (startResult.status === 0) {
-        for (let i = 0; i < 5; i++) {
-          const status = runCaptureOpenshell(["status"], { ignoreError: true });
-          const namedInfo = runCaptureOpenshell(["gateway", "info", "-g", GATEWAY_NAME], { ignoreError: true });
-          const currentInfo = runCaptureOpenshell(["gateway", "info"], { ignoreError: true });
-          if (isGatewayHealthy(status, namedInfo, currentInfo)) {
-            return; // success
-          }
-          if (i < 4) sleep(2);
+      for (let i = 0; i < 5; i++) {
+        const status = runCaptureOpenshell(["status"], { ignoreError: true });
+        const namedInfo = runCaptureOpenshell(["gateway", "info", "-g", GATEWAY_NAME], { ignoreError: true });
+        const currentInfo = runCaptureOpenshell(["gateway", "info"], { ignoreError: true });
+        if (isGatewayHealthy(status, namedInfo, currentInfo)) {
+          return; // success
         }
+        if (i < 4) sleep(2);
       }
 
       if (exitOnFailure) {
