@@ -508,21 +508,25 @@ function uninstall(args) {
   const uninstallDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-uninstall-"));
   const uninstallScript = path.join(uninstallDir, "uninstall.sh");
   let result;
+  let downloadFailed = false;
   try {
     try {
       execFileSync("curl", ["-fsSL", REMOTE_UNINSTALL_URL, "-o", uninstallScript], { stdio: "inherit" });
     } catch {
       console.error(`  Failed to download uninstall script from ${REMOTE_UNINSTALL_URL}`);
-      process.exit(1);
+      downloadFailed = true;
     }
-    result = spawnSync("bash", [uninstallScript, ...args], {
-      stdio: "inherit",
-      cwd: ROOT,
-      env: process.env,
-    });
+    if (!downloadFailed) {
+      result = spawnSync("bash", [uninstallScript, ...args], {
+        stdio: "inherit",
+        cwd: ROOT,
+        env: process.env,
+      });
+    }
   } finally {
     fs.rmSync(uninstallDir, { recursive: true, force: true });
   }
+  if (downloadFailed) process.exit(1);
   exitWithSpawnResult(result);
 }
 
