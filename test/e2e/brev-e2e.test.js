@@ -138,6 +138,20 @@ describe.runIf(hasRequiredVars)("Brev E2E", () => {
     const BREV_ORG = process.env.BREV_ORG || "Nemoclaw CI/CD";
     brev("org", "set", BREV_ORG);
 
+    // Ensure ~/.ssh/config includes brev's SSH config (fresh CI runners lack this)
+    const sshDir = path.join(homedir(), ".ssh");
+    mkdirSync(sshDir, { recursive: true, mode: 0o700 });
+    const sshConfigPath = path.join(sshDir, "config");
+    const brevInclude = `Include ${path.join(homedir(), ".brev", "ssh_config")}\n`;
+    try {
+      const existing = execSync(`cat ${sshConfigPath} 2>/dev/null || true`, { encoding: "utf-8" });
+      if (!existing.includes(".brev/ssh_config")) {
+        writeFileSync(sshConfigPath, brevInclude + existing, { mode: 0o600 });
+      }
+    } catch {
+      writeFileSync(sshConfigPath, brevInclude, { mode: 0o600 });
+    }
+
     // Create instance
     brev("create", INSTANCE_NAME, "--cpu", BREV_CPU, "--detached");
     instanceCreated = true;
