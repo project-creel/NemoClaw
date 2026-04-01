@@ -11,6 +11,7 @@ profiles:
   - ncp
   - nim-local
   - vllm
+  - hosted
 
 description: |
   NemoClaw blueprint: orchestrates OpenClaw sandbox creation, migration,
@@ -53,6 +54,18 @@ components:
         model: "nvidia/nemotron-3-nano-30b-a3b"
         credential_env: "OPENAI_API_KEY"
         credential_default: "dummy"
+
+      # Hosted/managed deployment: inference routed through an external
+      # LLM gateway (e.g., LiteLLM, vLLM behind a load balancer).
+      # The gateway URL and API key are injected at runtime via env vars
+      # rather than baked at build time.
+      hosted:
+        provider_type: "openai"
+        provider_name: "hosted-gateway"
+        endpoint: ""  # Set via LITELLM_UPSTREAM env var at runtime
+        model: ""     # Set via NEMOCLAW_MODEL env var at runtime
+        credential_env: "LITELLM_API_KEY"
+        dynamic_endpoint: true
 
   policy:
     base: "sandboxes/openclaw/policy.yaml"
