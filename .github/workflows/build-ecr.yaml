@@ -1,0 +1,140 @@
+# Build NemoClaw images and push to Creel's ECR.
+#
+# This workflow is specific to the project-creel/NemoClaw fork and will be
+# removed once hosted-claw changes land upstream in NVIDIA/NemoClaw.
+#
+# Uses the same hub/target IAM model as bisque CI:
+#   OIDC → creel-bisque-ci (management) → creel-bisque-target (workload ECR)
+
+name: Build NemoClaw ECR
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - "Dockerfile.base"
+      - "scripts/**"
+      - "nemoclaw-blueprint/**"
+      - "nemoclaw/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: build-ecr
+  cancel-in-progress: true
+
+env:
+  AWS_REGION: us-east-1
+  HUB_ROLE_ARN: arn:aws:iam::118688039365:role/creel-bisque-ci
+  TARGET_ROLE_ARN: arn:aws:iam::519570321834:role/creel-bisque-target
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up QEMU (ARM64 cross-build)
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Configure AWS credentials (OIDC → management hub)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.HUB_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configure workload account profile
+        run: |
+          mkdir -p ~/.aws
+          cat > ~/.aws/credentials << EOF
+          [creel-hub]
+          aws_access_key_id = ${AWS_ACCESS_KEY_ID}
+          aws_secret_access_key = ${AWS_SECRET_ACCESS_KEY}
+          aws_session_token = ${AWS_SESSION_TOKEN}
+          EOF
+
+          cat > ~/.aws/config << EOF
+          [profile creel-hub]
+          region = ${AWS_REGION}
+          [profile creel-workload]
+          role_arn = ${TARGET_ROLE_ARN}
+          source_profile = creel-hub
+          region = ${AWS_REGION}
+          EOF
+
+          {
+            echo "AWS_ACCESS_KEY_ID="
+            echo "AWS_SECRET_ACCESS_KEY="
+            echo "AWS_SESSION_TOKEN="
+            echo "AWS_PROFILE=creel-workload"
+          } >> "$GITHUB_ENV"
+
+      - name: Get ECR registry
+        id: ecr
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          echo "registry=${REGISTRY}" >> "$GITHUB_OUTPUT"
+
+      - name: Login to ECR
+        run: |
+          aws ecr get-login-password --region "${AWS_REGION}" \
+            | docker login --username AWS --password-stdin "${{ steps.ecr.outputs.registry }}"
+
+      - name: Extract short SHA
+        id: meta
+        run: echo "sha_short=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push base image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.base
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/creel/nemoclaw-base:${{ steps.meta.outputs.sha_short }}
+            ${{ steps.ecr.outputs.registry }}/creel/nemoclaw-base:latest
+          cache-from: type=gha,scope=nemoclaw-base
+          cache-to: type=gha,mode=max,scope=nemoclaw-base
+
+      - name: Build and push production image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/arm64
+          push: true
+          build-args: |
+            BASE_IMAGE=${{ steps.ecr.outputs.registry }}/creel/nemoclaw-base:${{ steps.meta.outputs.sha_short }}
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/creel/nemoclaw:${{ steps.meta.outputs.sha_short }}
+            ${{ steps.ecr.outputs.registry }}/creel/nemoclaw:latest
+          cache-from: type=gha,scope=nemoclaw-prod
+          cache-to: type=gha,mode=max,scope=nemoclaw-prod
+
+      - name: Summary
+        run: |
+          REGISTRY="${{ steps.ecr.outputs.registry }}"
+          SHA="${{ steps.meta.outputs.sha_short }}"
+          {
+            echo "### NemoClaw Images Pushed to ECR"
+            echo ""
+            echo "| Image | Tag |"
+            echo "|-------|-----|"
+            echo "| \`${REGISTRY}/creel/nemoclaw-base\` | \`${SHA}\`, \`latest\` |"
+            echo "| \`${REGISTRY}/creel/nemoclaw\` | \`${SHA}\`, \`latest\` |"
+            echo ""
+            echo "Commit: \`${SHA}\` | Build: #${{ github.run_number }}"
+          } >> "$GITHUB_STEP_SUMMARY"
