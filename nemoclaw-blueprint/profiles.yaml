@@ -1,0 +1,60 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Resource profiles for hosted NemoClaw deployments.
+# Maps T-shirt sizes to NODE_OPTIONS heap and container resource hints.
+#
+# Usage: set CLAW_SIZE=S|M|L|XL as an env var. The entrypoint reads
+# this file's values are applied by nemoclaw-start.sh at container startup.
+#
+# Container orchestrators (K8s, ECS) should set resource requests/limits
+# to match these profiles. The values below are recommendations.
+
+profiles:
+  S:
+    description: "Small — lightweight agents, single-channel bots"
+    node_heap_mb: 1536
+    resources:
+      requests:
+        cpu: "0.5"
+        memory: "1.5Gi"
+      limits:
+        cpu: "1"
+        memory: "2Gi"
+    storage: "8Gi"
+
+  M:
+    description: "Medium — multi-channel agents with plugins"
+    node_heap_mb: 3072
+    resources:
+      requests:
+        cpu: "1"
+        memory: "3Gi"
+      limits:
+        cpu: "2"
+        memory: "4Gi"
+    storage: "20Gi"
+
+  L:
+    description: "Large — agents with browser automation or heavy context"
+    node_heap_mb: 4096
+    resources:
+      requests:
+        cpu: "2"
+        memory: "5Gi"
+      limits:
+        cpu: "4"
+        memory: "6Gi"
+    storage: "40Gi"
+
+  XL:
+    description: "Extra large — full-featured agents with multiple tools"
+    node_heap_mb: 8192
+    resources:
+      requests:
+        cpu: "4"
+        memory: "10Gi"
+      limits:
+        cpu: "8"
+        memory: "12Gi"
+    storage: "80Gi"
