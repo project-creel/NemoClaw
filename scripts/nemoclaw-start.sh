@@ -10,8 +10,17 @@
 # The config hash is verified at startup to detect tampering.
 #
 # Optional env:
-#   NVIDIA_API_KEY   API key for NVIDIA-hosted inference
-#   CHAT_UI_URL      Browser origin that will access the forwarded dashboard
+#   NVIDIA_API_KEY       API key for NVIDIA-hosted inference
+#   CHAT_UI_URL          Browser origin that will access the forwarded dashboard
+#
+# Hosted mode env (NEMOCLAW_MODE=hosted):
+#   NEMOCLAW_MODE            Set to "hosted" for managed/cloud deployments
+#   NEMOCLAW_CONFIG_PATH     Path to externally-provided openclaw config JSON
+#   NEMOCLAW_SECRETS_PATH    Path to secrets env file (KEY=VALUE, one per line)
+#   CLAW_SIZE                T-shirt size for NODE_OPTIONS heap (S/M/L/XL)
+#   NEMOCLAW_HEALTH_PORT     Port for HTTP health endpoint (default: 8091)
+#   LITELLM_UPSTREAM         LLM gateway URL (injected into config)
+#   LITELLM_API_KEY          LLM gateway API key (injected into secrets)
 
 set -euo pipefail
 
@@ -281,10 +290,132 @@ if [ -w "$_SANDBOX_HOME" ]; then
   _write_proxy_snippet "${_SANDBOX_HOME}/.profile"
 fi
 
+# ── Hosted mode: heap sizing ─────────────────────────────────────
+# Maps CLAW_SIZE to NODE_OPTIONS --max-old-space-size for predictable
+# memory limits inside container resource requests.
+apply_heap_sizing() {
+  case "${CLAW_SIZE:-}" in
+    S)  export NODE_OPTIONS="--max-old-space-size=1536 ${NODE_OPTIONS:-}" ;;
+    M)  export NODE_OPTIONS="--max-old-space-size=3072 ${NODE_OPTIONS:-}" ;;
+    L)  export NODE_OPTIONS="--max-old-space-size=4096 ${NODE_OPTIONS:-}" ;;
+    XL) export NODE_OPTIONS="--max-old-space-size=8192 ${NODE_OPTIONS:-}" ;;
+    "") ;;  # No size set — use Node.js defaults
+    *)  echo "[hosted] Unknown CLAW_SIZE='${CLAW_SIZE}' — ignoring" >&2 ;;
+  esac
+}
+
+# ── Hosted mode: health endpoint ────────────────────────────────
+# Minimal HTTP health endpoint for K8s liveness/readiness probes.
+# Returns 200 when the gateway is reachable, 503 otherwise.
+start_health_endpoint() {
+  local port="${NEMOCLAW_HEALTH_PORT:-8091}"
+  local gateway_port="${GATEWAY_PORT:-18789}"
+
+  if command -v socat >/dev/null 2>&1; then
+    (while true; do
+      socat TCP-LISTEN:"${port}",reuseaddr,fork SYSTEM:"
+        if curl -sf http://127.0.0.1:${gateway_port}/healthz >/dev/null 2>&1; then
+          printf 'HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n\r\n{\"status\":\"ok\"}'
+        else
+          printf 'HTTP/1.0 503 Service Unavailable\r\nContent-Type: application/json\r\n\r\n{\"status\":\"starting\"}'
+        fi" 2>/dev/null
+    done) &
+  fi
+  echo "[hosted] Health endpoint listening on :${port}" >&2
+}
+
+# ── Hosted mode: inject external config ─────────────────────────
+# Config is provided externally (mounted volume or init container)
+# rather than baked at build time.
+inject_hosted_config() {
+  local config_path="${NEMOCLAW_CONFIG_PATH:-}"
+  local secrets_path="${NEMOCLAW_SECRETS_PATH:-}"
+  local target="/sandbox/.openclaw/openclaw.json"
+
+  if [ -n "$config_path" ] && [ -f "$config_path" ]; then
+    if python3 -c "import json; json.load(open('${config_path}'))" 2>/dev/null; then
+      cp "$config_path" "$target"
+      chmod 444 "$target"
+      chown root:root "$target"
+      sha256sum "$target" > /sandbox/.openclaw/.config-hash
+      chmod 444 /sandbox/.openclaw/.config-hash
+      chown root:root /sandbox/.openclaw/.config-hash
+      echo "[hosted] Config injected from ${config_path}" >&2
+    else
+      echo "[hosted] ERROR: Invalid JSON at ${config_path} — using built-in config" >&2
+    fi
+  fi
+
+  if [ -n "$secrets_path" ] && [ -f "$secrets_path" ]; then
+    cp "$secrets_path" /sandbox/.openclaw-data/.secrets.env
+    chmod 600 /sandbox/.openclaw-data/.secrets.env
+    chown sandbox:sandbox /sandbox/.openclaw-data/.secrets.env
+    echo "[hosted] Secrets loaded from ${secrets_path}" >&2
+  fi
+}
+
+# ── Hosted mode: source secrets ─────────────────────────────────
+source_hosted_secrets() {
+  local secrets_env="/sandbox/.openclaw-data/.secrets.env"
+  if [ -f "$secrets_env" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "$secrets_env"
+    set +a
+  fi
+}
+
 # ── Main ─────────────────────────────────────────────────────────
 
 echo 'Setting up NemoClaw...' >&2
 [ -f .env ] && chmod 600 .env
+
+# ── Hosted mode fast path ────────────────────────────────────────
+# In hosted mode, skip OpenShell proxy, auto-pair, and dashboard URLs.
+# Config comes from external injection (init container / mounted volume),
+# not from build-time bake or interactive onboarding.
+if [ "${NEMOCLAW_MODE:-}" = "hosted" ]; then
+  echo '[hosted] Running in hosted mode' >&2
+
+  apply_heap_sizing
+  inject_hosted_config
+  source_hosted_secrets
+
+  # Verify config integrity after injection
+  if ! verify_config_integrity; then
+    echo "[hosted] Config integrity check failed — refusing to start" >&2
+    exit 1
+  fi
+
+  write_auth_profile
+
+  # Start health endpoint for K8s probes
+  start_health_endpoint
+
+  # Start gateway — privilege separation if running as root
+  if [ "$(id -u)" -eq 0 ]; then
+    gosu sandbox bash -c "$(declare -f write_auth_profile); write_auth_profile"
+
+    touch /tmp/gateway.log
+    chown gateway:gateway /tmp/gateway.log
+    chmod 600 /tmp/gateway.log
+
+    nohup gosu gateway "$OPENCLAW" gateway run >/tmp/gateway.log 2>&1 &
+    GATEWAY_PID=$!
+    echo "[hosted] Gateway launched as 'gateway' user (pid $GATEWAY_PID)" >&2
+  else
+    export HOME=/sandbox
+    touch /tmp/gateway.log
+    chmod 600 /tmp/gateway.log
+
+    nohup "$OPENCLAW" gateway run >/tmp/gateway.log 2>&1 &
+    GATEWAY_PID=$!
+    echo "[hosted] Gateway launched (pid $GATEWAY_PID)" >&2
+  fi
+
+  wait "$GATEWAY_PID"
+  exit $?
+fi
 
 # ── Non-root fallback ──────────────────────────────────────────
 # OpenShell runs containers with --security-opt=no-new-privileges, which

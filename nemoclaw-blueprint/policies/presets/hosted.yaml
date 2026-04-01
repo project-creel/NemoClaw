@@ -1,0 +1,76 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Network policy preset for hosted/managed NemoClaw deployments.
+#
+# In hosted mode, the sandbox runs inside a K8s pod where L3/L4 network
+# isolation is handled by K8s NetworkPolicy. This preset defines the
+# L7 egress rules for the OpenShell proxy layer.
+#
+# The LLM gateway endpoint is typically cluster-internal (e.g.,
+# litellm.internal.creel:4000) and accessed via an NLB or ClusterIP.
+
+preset:
+  name: hosted
+  description: "Hosted/managed deployment — LLM gateway + cloud storage egress"
+
+network_policies:
+  # LLM gateway (LiteLLM or compatible OpenAI-API proxy).
+  # Endpoint is injected at runtime via LITELLM_UPSTREAM env var.
+  # Using access: full to support both REST and streaming responses.
+  llm_gateway:
+    name: llm_gateway
+    endpoints:
+      - host: "*.internal.creel"
+        port: 4000
+        access: full
+      # Allow any private-network LLM gateway (cluster-internal)
+      - host: "*.svc.cluster.local"
+        port: 4000
+        access: full
+    binaries:
+      - { path: /usr/local/bin/node }
+      - { path: /usr/local/bin/openclaw }
+
+  # AWS S3 — config and credential fetch by init container / sidecar.
+  # Agent pods use IRSA; no credentials in the sandbox itself.
+  aws_s3:
+    name: aws_s3
+    endpoints:
+      - host: "*.s3.amazonaws.com"
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        tls: terminate
+        rules:
+          - allow: { method: GET, path: "/**" }
+      - host: "*.s3.us-east-1.amazonaws.com"
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        tls: terminate
+        rules:
+          - allow: { method: GET, path: "/**" }
+    binaries:
+      - { path: /usr/local/bin/node }
+
+  # AWS STS — needed for IRSA token exchange (web identity → temporary creds)
+  aws_sts:
+    name: aws_sts
+    endpoints:
+      - host: sts.amazonaws.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        tls: terminate
+        rules:
+          - allow: { method: POST, path: "/**" }
+      - host: "sts.us-east-1.amazonaws.com"
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        tls: terminate
+        rules:
+          - allow: { method: POST, path: "/**" }
+    binaries:
+      - { path: /usr/local/bin/node }
