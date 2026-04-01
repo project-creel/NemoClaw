@@ -83,8 +83,11 @@ RUN arch="$(dpkg --print-architecture)" \
 # Create sandbox user (matches OpenShell convention) and gateway user.
 # The gateway runs as 'gateway' so the 'sandbox' user (agent) cannot
 # kill it or restart it with a tampered HOME/config.
-RUN groupadd -r gateway && useradd -r -g gateway -d /sandbox -s /usr/sbin/nologin gateway \
-    && groupadd -r sandbox && useradd -r -g sandbox -d /sandbox -s /bin/bash sandbox \
+# UIDs are pinned for deterministic PVC ownership in hosted/K8s deployments:
+#   gateway = 999 (service user, no login)
+#   sandbox = 1000 (agent user, matches common K8s runAsUser convention)
+RUN groupadd --gid 999 gateway && useradd --uid 999 --gid 999 -d /sandbox -s /usr/sbin/nologin gateway \
+    && groupadd --gid 1000 sandbox && useradd --uid 1000 --gid 1000 -d /sandbox -s /bin/bash sandbox \
     && mkdir -p /sandbox/.nemoclaw \
     && chown -R sandbox:sandbox /sandbox
 
