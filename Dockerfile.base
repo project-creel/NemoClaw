@@ -16,8 +16,8 @@
 #                          docker-pin-check.yaml
 #   apt packages        — pinned to exact Debian bookworm versions
 #   gosu 1.19           — pinned release + per-arch sha256 checksum
-#   gateway/sandbox     — OS users and groups; names and UIDs are a
-#     users               stable contract with OpenShell
+#   gateway/sandbox/    — OS users and groups; names and UIDs are a
+#     orchestrator users   stable contract with OpenShell
 #   .openclaw dirs      — directory structure + symlinks are dictated by
 #     + symlinks          the OpenClaw CLI layout; new dirs are additive
 #                          (add them here and rebuild)
@@ -80,11 +80,15 @@ RUN arch="$(dpkg --print-architecture)" \
     && chmod +x /usr/local/bin/gosu \
     && gosu --version
 
-# Create sandbox user (matches OpenShell convention) and gateway user.
+# Create sandbox user (matches OpenShell convention), gateway user, and
+# orchestrator user.
 # The gateway runs as 'gateway' so the 'sandbox' user (agent) cannot
 # kill it or restart it with a tampered HOME/config.
+# The orchestrator (UID 900) runs init/sidecar containers that prepare
+# the sandbox environment; it needs no login shell.
 RUN groupadd -r gateway && useradd -r -g gateway -d /sandbox -s /usr/sbin/nologin gateway \
     && groupadd -r sandbox && useradd -r -g sandbox -d /sandbox -s /bin/bash sandbox \
+    && groupadd -r orchestrator && useradd -r -u 900 -g orchestrator -d /sandbox -s /usr/sbin/nologin orchestrator \
     && mkdir -p /sandbox/.nemoclaw \
     && chown -R sandbox:sandbox /sandbox
 
