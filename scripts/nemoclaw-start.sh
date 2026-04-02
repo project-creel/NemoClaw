@@ -536,12 +536,22 @@ start_health_endpoint() {
   local port="${NEMOCLAW_HEALTH_PORT:-8091}"
   local gateway_port="${GATEWAY_PORT:-18789}"
 
-  if command -v socat >/dev/null 2>&1; then
-    (while true; do
-      socat TCP-LISTEN:"${port}",reuseaddr,fork \
-        SYSTEM:"if curl -sf http://127.0.0.1:${gateway_port}/healthz >/dev/null 2>&1; then printf 'HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n\r\n{\"status\":\"ok\"}'; else printf 'HTTP/1.0 503 Service Unavailable\r\nContent-Type: application/json\r\n\r\n{\"status\":\"starting\"}'; fi" 2>/dev/null
-    done) &
-  fi
+  node -e "
+    const http = require('http');
+    http.createServer((req, res) => {
+      http.get('http://127.0.0.1:${gateway_port}/healthz', (upstream) => {
+        let body = '';
+        upstream.on('data', c => body += c);
+        upstream.on('end', () => {
+          res.writeHead(upstream.statusCode, { 'Content-Type': 'application/json' });
+          res.end(body);
+        });
+      }).on('error', () => {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'starting' }));
+      });
+    }).listen(${port});
+  " &
   echo "[hosted] Health endpoint listening on :${port}" >&2
 }
 
