@@ -387,6 +387,13 @@ echo 'Setting up NemoClaw...' >&2
 if [ "${NEMOCLAW_MODE:-}" = "hosted" ]; then
   echo '[hosted] Running in hosted mode' >&2
 
+  # Route outbound traffic through the daemon's forward proxy instead
+  # of the OpenShell proxy (which doesn't exist in hosted mode).
+  _HOSTED_PROXY="http://127.0.0.1:${NEMOCLAW_PROXY_PORT:-3128}"
+  export HTTP_PROXY="$_HOSTED_PROXY" http_proxy="$_HOSTED_PROXY"
+  export HTTPS_PROXY="$_HOSTED_PROXY" https_proxy="$_HOSTED_PROXY"
+  export NO_PROXY="localhost,127.0.0.1,::1" no_proxy="localhost,127.0.0.1,::1"
+
   apply_heap_sizing
   inject_hosted_config
   source_hosted_secrets
