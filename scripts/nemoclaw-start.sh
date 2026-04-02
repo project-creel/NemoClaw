@@ -557,14 +557,18 @@ inject_hosted_config() {
   local secrets_path="${NEMOCLAW_SECRETS_PATH:-}"
   local target="/sandbox/.openclaw/openclaw.json"
 
-  if [ -n "$config_path" ] && [ -f "$config_path" ]; then
+  # If the orchestrator (init container) already placed a valid config,
+  # skip the copy but still process secrets below.
+  if [ -f "$target" ] && verify_config_integrity 2>/dev/null; then
+    echo "[hosted] Config pre-populated by orchestrator, skipping injection" >&2
+  elif [ -n "$config_path" ] && [ -f "$config_path" ]; then
     if python3 -c "import json; json.load(open('${config_path}'))" 2>/dev/null; then
       cp "$config_path" "$target"
       chmod 444 "$target"
-      chown root:root "$target"
+      chown root:root "$target" 2>/dev/null || true
       sha256sum "$target" >/sandbox/.openclaw/.config-hash
       chmod 444 /sandbox/.openclaw/.config-hash
-      chown root:root /sandbox/.openclaw/.config-hash
+      chown root:root /sandbox/.openclaw/.config-hash 2>/dev/null || true
       echo "[hosted] Config injected from ${config_path}" >&2
     else
       echo "[hosted] ERROR: Invalid JSON at ${config_path} — using built-in config" >&2
@@ -574,7 +578,7 @@ inject_hosted_config() {
   if [ -n "$secrets_path" ] && [ -f "$secrets_path" ]; then
     cp "$secrets_path" /sandbox/.openclaw-data/.secrets.env
     chmod 600 /sandbox/.openclaw-data/.secrets.env
-    chown sandbox:sandbox /sandbox/.openclaw-data/.secrets.env
+    chown sandbox:sandbox /sandbox/.openclaw-data/.secrets.env 2>/dev/null || true
     echo "[hosted] Secrets loaded from ${secrets_path}" >&2
   fi
 }
