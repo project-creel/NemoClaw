@@ -520,12 +520,12 @@ cleanup() {
 # memory limits inside container resource requests.
 apply_heap_sizing() {
   case "${CLAW_SIZE:-}" in
-    S)  export NODE_OPTIONS="--max-old-space-size=1536 ${NODE_OPTIONS:-}" ;;
-    M)  export NODE_OPTIONS="--max-old-space-size=3072 ${NODE_OPTIONS:-}" ;;
-    L)  export NODE_OPTIONS="--max-old-space-size=4096 ${NODE_OPTIONS:-}" ;;
+    S) export NODE_OPTIONS="--max-old-space-size=1536 ${NODE_OPTIONS:-}" ;;
+    M) export NODE_OPTIONS="--max-old-space-size=3072 ${NODE_OPTIONS:-}" ;;
+    L) export NODE_OPTIONS="--max-old-space-size=4096 ${NODE_OPTIONS:-}" ;;
     XL) export NODE_OPTIONS="--max-old-space-size=8192 ${NODE_OPTIONS:-}" ;;
-    "") ;;  # No size set — use Node.js defaults
-    *)  echo "[hosted] Unknown CLAW_SIZE='${CLAW_SIZE}' — ignoring" >&2 ;;
+    "") ;; # No size set — use Node.js defaults
+    *) echo "[hosted] Unknown CLAW_SIZE='${CLAW_SIZE}' — ignoring" >&2 ;;
   esac
 }
 
@@ -562,7 +562,7 @@ inject_hosted_config() {
       cp "$config_path" "$target"
       chmod 444 "$target"
       chown root:root "$target"
-      sha256sum "$target" > /sandbox/.openclaw/.config-hash
+      sha256sum "$target" >/sandbox/.openclaw/.config-hash
       chmod 444 /sandbox/.openclaw/.config-hash
       chown root:root /sandbox/.openclaw/.config-hash
       echo "[hosted] Config injected from ${config_path}" >&2
