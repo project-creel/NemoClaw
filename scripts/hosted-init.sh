@@ -53,7 +53,7 @@ fetch_from_s3() {
 
   # Fetch secrets (optional — may not exist for all claws)
   if aws s3 cp "s3://${bucket}/${secrets_key}" /tmp/secrets.json \
-      --region "$AWS_REGION" --quiet 2>/dev/null; then
+    --region "$AWS_REGION" --quiet 2>/dev/null; then
     echo "[init] Secrets fetched from S3" >&2
     convert_secrets_json /tmp/secrets.json "${OUTPUT_DIR}/.secrets.env"
     rm -f /tmp/secrets.json
@@ -142,15 +142,15 @@ inject_runtime_secrets() {
 
   # LiteLLM credentials
   if [ -n "${LITELLM_API_KEY:-}" ]; then
-    echo "LITELLM_API_KEY=${LITELLM_API_KEY}" >> "$secrets_file"
+    echo "LITELLM_API_KEY=${LITELLM_API_KEY}" >>"$secrets_file"
   fi
   if [ -n "${LITELLM_UPSTREAM:-}" ]; then
-    echo "LITELLM_UPSTREAM=${LITELLM_UPSTREAM}" >> "$secrets_file"
+    echo "LITELLM_UPSTREAM=${LITELLM_UPSTREAM}" >>"$secrets_file"
   fi
 
   # Claw sizing
   if [ -n "${CLAW_SIZE:-}" ]; then
-    echo "CLAW_SIZE=${CLAW_SIZE}" >> "$secrets_file"
+    echo "CLAW_SIZE=${CLAW_SIZE}" >>"$secrets_file"
   fi
 }
 
