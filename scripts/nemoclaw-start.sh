@@ -538,12 +538,8 @@ start_health_endpoint() {
 
   if command -v socat >/dev/null 2>&1; then
     (while true; do
-      socat TCP-LISTEN:"${port}",reuseaddr,fork SYSTEM:"
-        if curl -sf http://127.0.0.1:${gateway_port}/healthz >/dev/null 2>&1; then
-          printf 'HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n\r\n{\"status\":\"ok\"}'
-        else
-          printf 'HTTP/1.0 503 Service Unavailable\r\nContent-Type: application/json\r\n\r\n{\"status\":\"starting\"}'
-        fi" 2>/dev/null
+      socat TCP-LISTEN:"${port}",reuseaddr,fork \
+        SYSTEM:"if curl -sf http://127.0.0.1:${gateway_port}/healthz >/dev/null 2>&1; then printf 'HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n\r\n{\"status\":\"ok\"}'; else printf 'HTTP/1.0 503 Service Unavailable\r\nContent-Type: application/json\r\n\r\n{\"status\":\"starting\"}'; fi" 2>/dev/null
     done) &
   fi
   echo "[hosted] Health endpoint listening on :${port}" >&2
