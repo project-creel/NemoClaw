@@ -7,9 +7,9 @@ import policies from "../bin/lib/policies";
 
 describe("policies", () => {
   describe("listPresets", () => {
-    it("returns all 10 presets", () => {
+    it("returns all presets", () => {
       const presets = policies.listPresets();
-      expect(presets.length).toBe(10);
+      expect(presets.length).toBe(12);
     });
 
     it("each preset has name and description", () => {
@@ -25,6 +25,8 @@ describe("policies", () => {
         .map((p) => p.name)
         .sort();
       const expected = [
+        "brave",
+        "brew",
         "discord",
         "docker",
         "hosted",
