@@ -565,8 +565,12 @@ inject_hosted_config() {
 
   # If the orchestrator (init container) already placed a valid config,
   # skip the copy but still process secrets below.
-  if [ -f "$target" ] && verify_config_integrity 2>/dev/null; then
-    echo "[hosted] Config pre-populated by orchestrator, skipping injection" >&2
+  if [ -f "$target" ]; then
+    if verify_config_integrity 2>/dev/null; then
+      echo "[hosted] Config pre-populated by orchestrator, skipping injection" >&2
+    else
+      echo "[hosted] Config exists but hash mismatch — orchestrator manages integrity" >&2
+    fi
   elif [ -n "$config_path" ] && [ -f "$config_path" ]; then
     if python3 -c "import json; json.load(open('${config_path}'))" 2>/dev/null; then
       cp "$config_path" "$target"
