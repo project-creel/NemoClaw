@@ -587,7 +587,7 @@ inject_hosted_config() {
 
   if [ -n "$secrets_path" ] && [ -f "$secrets_path" ]; then
     cp "$secrets_path" /sandbox/.openclaw-data/.secrets.env
-    chmod 600 /sandbox/.openclaw-data/.secrets.env
+    chmod 600 /sandbox/.openclaw-data/.secrets.env 2>/dev/null || true
     chown sandbox:sandbox /sandbox/.openclaw-data/.secrets.env 2>/dev/null || true
     echo "[hosted] Secrets loaded from ${secrets_path}" >&2
   fi
