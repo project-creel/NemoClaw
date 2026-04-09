@@ -28,15 +28,11 @@
 set -euo pipefail
 
 # Harden: limit process count to prevent fork bombs (ref: #809)
-# Prefer cgroup pids.max (per-pod, properly isolated) over ulimit nproc
-# (per-UID, bleeds across pods sharing the same UID on the same node).
-# On K8s with cgroup v2, /sys/fs/cgroup/pids.max is writable by root.
-# Fall back to ulimit for local Docker / OpenShell where cgroup may not
-# be available or writable.
-if [ -w /sys/fs/cgroup/pids.max ]; then
-  echo 1024 > /sys/fs/cgroup/pids.max
-  echo "[SECURITY] Fork-bomb guard: cgroup pids.max=1024" >&2
-else
+# In hosted mode, the provisioning harness (K8s init container) sets
+# cgroup pids.max per-pod — no action needed here. ulimit nproc is
+# per-UID at the kernel level and bleeds across pods sharing the same
+# UID on the same node, so it must not be used in multi-pod environments.
+if [ "${NEMOCLAW_MODE:-}" != "hosted" ]; then
   # Best-effort: some container runtimes (e.g., brev) restrict ulimit
   # modification, returning "Invalid argument". Warn but don't block startup.
   if ! ulimit -Su 512 2>/dev/null; then
