@@ -28,13 +28,23 @@
 set -euo pipefail
 
 # Harden: limit process count to prevent fork bombs (ref: #809)
-# Best-effort: some container runtimes (e.g., brev) restrict ulimit
-# modification, returning "Invalid argument". Warn but don't block startup.
-if ! ulimit -Su 512 2>/dev/null; then
-  echo "[SECURITY] Could not set soft nproc limit (container runtime may restrict ulimit)" >&2
-fi
-if ! ulimit -Hu 512 2>/dev/null; then
-  echo "[SECURITY] Could not set hard nproc limit (container runtime may restrict ulimit)" >&2
+# Prefer cgroup pids.max (per-pod, properly isolated) over ulimit nproc
+# (per-UID, bleeds across pods sharing the same UID on the same node).
+# On K8s with cgroup v2, /sys/fs/cgroup/pids.max is writable by root.
+# Fall back to ulimit for local Docker / OpenShell where cgroup may not
+# be available or writable.
+if [ -w /sys/fs/cgroup/pids.max ]; then
+  echo 1024 > /sys/fs/cgroup/pids.max
+  echo "[SECURITY] Fork-bomb guard: cgroup pids.max=1024" >&2
+else
+  # Best-effort: some container runtimes (e.g., brev) restrict ulimit
+  # modification, returning "Invalid argument". Warn but don't block startup.
+  if ! ulimit -Su 512 2>/dev/null; then
+    echo "[SECURITY] Could not set soft nproc limit (container runtime may restrict ulimit)" >&2
+  fi
+  if ! ulimit -Hu 512 2>/dev/null; then
+    echo "[SECURITY] Could not set hard nproc limit (container runtime may restrict ulimit)" >&2
+  fi
 fi
 
 # SECURITY: Lock down PATH so the agent cannot inject malicious binaries
