@@ -133,7 +133,6 @@ jobs:
           PROD_REG="${PROD_REGISTRY}"
           STG_REG="${STAGING_REGISTRY}"
 
-          # Configure staging profile alongside existing prod profile
           cat >> ~/.aws/config << EOF
           [profile creel-staging]
           role_arn = ${STAGING_TARGET_ROLE_ARN}
@@ -146,6 +145,7 @@ jobs:
 
           for REPO in creel/nemoclaw-base creel/nemoclaw; do
             for TAG in "${SHA}" latest; do
+              docker pull "${PROD_REG}/${REPO}:${TAG}"
               docker tag "${PROD_REG}/${REPO}:${TAG}" "${STG_REG}/${REPO}:${TAG}"
               docker push "${STG_REG}/${REPO}:${TAG}"
             done
