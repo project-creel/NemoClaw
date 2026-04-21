@@ -144,7 +144,7 @@ jobs:
             | docker login --username AWS --password-stdin "${STG_REG}"
 
           for REPO in creel/nemoclaw-base creel/nemoclaw; do
-            docker pull "${PROD_REG}/${REPO}:latest"
+            docker pull --platform linux/arm64 "${PROD_REG}/${REPO}:latest"
             docker tag "${PROD_REG}/${REPO}:latest" "${STG_REG}/${REPO}:latest"
             docker push "${STG_REG}/${REPO}:latest"
             docker tag "${PROD_REG}/${REPO}:latest" "${STG_REG}/${REPO}:${SHA}"
