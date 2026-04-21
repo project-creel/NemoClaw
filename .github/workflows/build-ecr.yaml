@@ -31,6 +31,9 @@ env:
   AWS_REGION: us-east-1
   HUB_ROLE_ARN: arn:aws:iam::118688039365:role/creel-bisque-ci
   TARGET_ROLE_ARN: arn:aws:iam::519570321834:role/creel-bisque-target
+  STAGING_TARGET_ROLE_ARN: arn:aws:iam::017118230506:role/creel-bisque-target
+  PROD_REGISTRY: 519570321834.dkr.ecr.us-east-1.amazonaws.com
+  STAGING_REGISTRY: 017118230506.dkr.ecr.us-east-1.amazonaws.com
 
 jobs:
   build-and-push:
@@ -124,6 +127,30 @@ jobs:
           cache-from: type=gha,scope=nemoclaw-prod
           cache-to: type=gha,mode=max,scope=nemoclaw-prod
 
+      - name: Push to staging ECR
+        run: |
+          SHA="${{ steps.meta.outputs.sha_short }}"
+          PROD_REG="${PROD_REGISTRY}"
+          STG_REG="${STAGING_REGISTRY}"
+
+          # Configure staging profile alongside existing prod profile
+          cat >> ~/.aws/config << EOF
+          [profile creel-staging]
+          role_arn = ${STAGING_TARGET_ROLE_ARN}
+          source_profile = creel-hub
+          region = ${AWS_REGION}
+          EOF
+
+          AWS_PROFILE=creel-staging aws ecr get-login-password --region "${AWS_REGION}" \
+            | docker login --username AWS --password-stdin "${STG_REG}"
+
+          for REPO in creel/nemoclaw-base creel/nemoclaw; do
+            for TAG in "${SHA}" latest; do
+              docker tag "${PROD_REG}/${REPO}:${TAG}" "${STG_REG}/${REPO}:${TAG}"
+              docker push "${STG_REG}/${REPO}:${TAG}"
+            done
+          done
+
       - name: Summary
         run: |
           REGISTRY="${{ steps.ecr.outputs.registry }}"
@@ -131,10 +158,10 @@ jobs:
           {
             echo "### NemoClaw Images Pushed to ECR"
             echo ""
-            echo "| Image | Tag |"
-            echo "|-------|-----|"
-            echo "| \`${REGISTRY}/creel/nemoclaw-base\` | \`${SHA}\`, \`latest\` |"
-            echo "| \`${REGISTRY}/creel/nemoclaw\` | \`${SHA}\`, \`latest\` |"
+            echo "| Image | Tag | Registries |"
+            echo "|-------|-----|------------|"
+            echo "| \`creel/nemoclaw-base\` | \`${SHA}\`, \`latest\` | prod + staging |"
+            echo "| \`creel/nemoclaw\` | \`${SHA}\`, \`latest\` | prod + staging |"
             echo ""
             echo "Commit: \`${SHA}\` | Build: #${{ github.run_number }}"
           } >> "$GITHUB_STEP_SUMMARY"
