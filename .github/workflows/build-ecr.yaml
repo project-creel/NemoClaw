@@ -144,11 +144,11 @@ jobs:
             | docker login --username AWS --password-stdin "${STG_REG}"
 
           for REPO in creel/nemoclaw-base creel/nemoclaw; do
-            for TAG in "${SHA}" latest; do
-              docker pull "${PROD_REG}/${REPO}:${TAG}"
-              docker tag "${PROD_REG}/${REPO}:${TAG}" "${STG_REG}/${REPO}:${TAG}"
-              docker push "${STG_REG}/${REPO}:${TAG}"
-            done
+            docker pull "${PROD_REG}/${REPO}:latest"
+            docker tag "${PROD_REG}/${REPO}:latest" "${STG_REG}/${REPO}:latest"
+            docker push "${STG_REG}/${REPO}:latest"
+            docker tag "${PROD_REG}/${REPO}:latest" "${STG_REG}/${REPO}:${SHA}"
+            docker push "${STG_REG}/${REPO}:${SHA}"
           done
 
       - name: Summary
