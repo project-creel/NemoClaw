@@ -77,6 +77,73 @@ describe("plugin registration", () => {
       expect.objectContaining({ id: "inference/nvidia/custom-model" }),
     ]);
   });
+
+  it("normalizes single-target message sends before tool execution", async () => {
+    const api = createMockApi();
+    register(api);
+
+    const beforeToolCall = vi
+      .mocked(api.on)
+      .mock.calls.find(([hookName]) => hookName === "before_tool_call")?.[1] as
+      | ((event: { toolName: string; params: Record<string, unknown> }) => Promise<unknown>)
+      | undefined;
+
+    if (!beforeToolCall) {
+      throw new Error("before_tool_call hook was not registered");
+    }
+
+    const result = await beforeToolCall({
+      toolName: "message",
+      params: {
+        action: "send",
+        message: "hello",
+        targets: ["+972505335313"],
+      },
+    });
+
+    expect(result).toEqual({
+      params: {
+        action: "send",
+        message: "hello",
+        target: "+972505335313",
+      },
+    });
+  });
+
+  it("does not rewrite invalid or multi-target message sends", async () => {
+    const api = createMockApi();
+    register(api);
+
+    const beforeToolCall = vi
+      .mocked(api.on)
+      .mock.calls.find(([hookName]) => hookName === "before_tool_call")?.[1] as
+      | ((event: { toolName: string; params: Record<string, unknown> }) => Promise<unknown>)
+      | undefined;
+
+    if (!beforeToolCall) {
+      throw new Error("before_tool_call hook was not registered");
+    }
+
+    await expect(
+      beforeToolCall({
+        toolName: "message",
+        params: {
+          action: "send",
+          targets: ["<|channel>thought"],
+        },
+      }),
+    ).resolves.toBeUndefined();
+
+    await expect(
+      beforeToolCall({
+        toolName: "message",
+        params: {
+          action: "broadcast",
+          targets: ["+972505335313"],
+        },
+      }),
+    ).resolves.toBeUndefined();
+  });
 });
 
 describe("getPluginConfig", () => {

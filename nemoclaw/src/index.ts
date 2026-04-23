@@ -119,7 +119,7 @@ export interface OpenClawPluginApi {
   registerProvider: (provider: ProviderPlugin) => void;
   registerService: (service: PluginService) => void;
   resolvePath: (input: string) => string;
-  on: (hookName: string, handler: (...args: unknown[]) => void) => void;
+  on: <TArgs extends unknown[]>(hookName: string, handler: (...args: TArgs) => unknown) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -131,6 +131,66 @@ export interface NemoClawConfig {
   blueprintRegistry: string;
   sandboxName: string;
   inferenceProvider: string;
+}
+
+type ToolParams = Record<string, unknown>;
+
+type BeforeToolCallEvent = {
+  toolName?: string;
+  params?: ToolParams;
+};
+
+type BeforeToolCallResult = {
+  params?: ToolParams;
+};
+
+const SINGLE_TARGET_MESSAGE_ACTIONS = new Set([
+  "send",
+  "sendWithEffect",
+  "sendAttachment",
+  "upload-file",
+  "reply",
+  "thread-reply",
+]);
+
+function asNonEmptyString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function readSingleTargetCandidate(value: unknown): string | undefined {
+  if (!Array.isArray(value) || value.length !== 1) {
+    return undefined;
+  }
+  const candidate = asNonEmptyString(value[0]);
+  if (!candidate) {
+    return undefined;
+  }
+  if (candidate.includes("<|") || candidate.includes("|>")) {
+    return undefined;
+  }
+  return candidate;
+}
+
+function normalizeSingleTargetMessageToolParams(params: ToolParams): ToolParams | undefined {
+  const action = asNonEmptyString(params["action"]);
+  if (!action || !SINGLE_TARGET_MESSAGE_ACTIONS.has(action)) {
+    return undefined;
+  }
+  if (asNonEmptyString(params["target"])) {
+    return undefined;
+  }
+  const candidate = readSingleTargetCandidate(params["targets"]);
+  if (!candidate) {
+    return undefined;
+  }
+
+  const normalized: ToolParams = { ...params, target: candidate };
+  delete normalized["targets"];
+  return normalized;
 }
 
 function activeModelEntries(
@@ -247,6 +307,18 @@ export default function register(api: OpenClawPluginApi): void {
   const onboardCfg = loadOnboardConfig();
   const providerCredentialEnv = onboardCfg?.credentialEnv ?? "NVIDIA_API_KEY";
   api.registerProvider(registeredProviderForConfig(onboardCfg, providerCredentialEnv));
+
+  api.on("before_tool_call", async (event: BeforeToolCallEvent): Promise<BeforeToolCallResult | undefined> => {
+    if (event.toolName !== "message" || !event.params) {
+      return undefined;
+    }
+    const normalized = normalizeSingleTargetMessageToolParams(event.params);
+    if (!normalized) {
+      return undefined;
+    }
+    api.logger.debug("normalized message tool params from targets[0] to target");
+    return { params: normalized };
+  });
 
   const bannerEndpoint = onboardCfg ? describeOnboardEndpoint(onboardCfg) : "build.nvidia.com";
   const bannerProvider = onboardCfg ? describeOnboardProvider(onboardCfg) : "NVIDIA Endpoints";
