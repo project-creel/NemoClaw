@@ -536,29 +536,64 @@ apply_heap_sizing() {
 }
 
 # ── Hosted mode: health endpoint ────────────────────────────────
-# Minimal HTTP health endpoint for K8s liveness/readiness probes.
-# Returns 200 when the gateway is reachable, 503 otherwise.
+# Minimal HTTP health endpoint for K8s readiness probes.
+#
+# Architecture: this endpoint runs in its own backgrounded Node process,
+# isolated from the openclaw gateway's event loop. It returns 200 when the
+# gateway is alive (TCP-level check), 503 otherwise.
+#
+# Why TCP, not HTTP /healthz proxy: the previous implementation proxied to
+# `:18789/healthz` on the gateway. When the gateway's main thread was busy
+# with a synchronous LLM call (e.g. a Sonnet ReAct loop holding the event
+# loop for 10-30s), the HTTP request hung past the kubelet's 1s probe
+# timeout — readiness flapped, pods cycled every few minutes. Observed on
+# canary 19076649433734075 (47h cycle loop, 2026-05-12 → 2026-05-14).
+#
+# A TCP socket check is sufficient for the readiness signal: kubelet wants
+# to know "is this pod alive enough to keep around", not "is the agent
+# responsive RIGHT NOW". The kernel handles `accept()` regardless of
+# whether the gateway thread is busy. If the gateway PROCESS dies, the
+# kernel releases the port and TCP connect fails immediately. That's the
+# correct readiness semantic.
+#
+# Liveness (process responsive) is intentionally NOT checked here — that's
+# what alerting + observability dashboards are for, not a probe that can
+# false-positive a working pod into oblivion.
 start_health_endpoint() {
   local port="${NEMOCLAW_HEALTH_PORT:-8091}"
   local gateway_port="${GATEWAY_PORT:-18789}"
 
   node -e "
     const http = require('http');
+    const net = require('net');
+    const GATEWAY_PORT = ${gateway_port};
+    const PROBE_TIMEOUT_MS = 250;
+    function probeGateway(cb) {
+      const sock = net.connect({ port: GATEWAY_PORT, host: '127.0.0.1' });
+      let settled = false;
+      const finish = (ok) => {
+        if (settled) return;
+        settled = true;
+        sock.destroy();
+        cb(ok);
+      };
+      sock.setTimeout(PROBE_TIMEOUT_MS, () => finish(false));
+      sock.once('connect', () => finish(true));
+      sock.once('error', () => finish(false));
+    }
     http.createServer((req, res) => {
-      http.get('http://127.0.0.1:${gateway_port}/healthz', (upstream) => {
-        let body = '';
-        upstream.on('data', c => body += c);
-        upstream.on('end', () => {
-          res.writeHead(upstream.statusCode, { 'Content-Type': 'application/json' });
-          res.end(body);
-        });
-      }).on('error', () => {
-        res.writeHead(503, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ status: 'starting' }));
+      probeGateway((ok) => {
+        if (ok) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ status: 'live' }));
+        } else {
+          res.writeHead(503, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ status: 'starting' }));
+        }
       });
     }).listen(${port});
   " &
-  echo "[hosted] Health endpoint listening on :${port}" >&2
+  echo "[hosted] Health endpoint listening on :${port} (tcp-probe gateway:${gateway_port})" >&2
 }
 
 # ── Hosted mode: inject external config ─────────────────────────
